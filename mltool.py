@@ -7,6 +7,8 @@ import sys
 
 import numpy
 import sklearn
+from sklearn import cross_validation
+from sklearn.feature_extraction import DictVectorizer
 
 import pydev
 
@@ -33,12 +35,13 @@ class NameIDTransformer:
 class DataReader(object):
     def __init__(self):
         self.__seperator = ','
-        self.__expect_column_count = 5
-        self.__target_column = 4
+        self.__expect_column_count = -1
+        self.__target_column = -1
         self.__name_to_id_dict = {}
         self.__ignore_first_row = False
         self.__ignore_columns = set()
         self.__target_trans = NameIDTransformer()
+        self.__dv = None
 
         self.__X = []
         self.__Y = []
@@ -79,6 +82,8 @@ class DataReader(object):
         self.__X = []
         self.__Y = []
         first_row = True
+
+        dict_list = []
         for row in pydev.foreach_row(
                 file(filename), 
                 seperator=self.__seperator):
@@ -97,6 +102,25 @@ class DataReader(object):
 
             row = map(lambda x:x.strip(), row)
 
+
+            '''
+            # get x dict.
+            x_dict = {}
+            for cid, value in enumerate(row):
+                if cid == self.__target_column:
+                    continue
+                if cid in self.__name_to_id_dict:
+                    x_dict[ 'col:%d' % cid ] = value
+                else:
+                    x_dict[ 'col:%d' % cid ] = float(value)
+            dict_list.append(x_dict)
+
+            # get Y
+            row[self.__target_column] = self.__target_trans.read( row[self.__target_column] )
+            y = row[self.__target_column]
+            self.__Y.append(y)
+
+            '''
             for cid, trans in self.__name_to_id_dict.iteritems():
                 row[cid] = trans.read(row[cid])
 
@@ -109,16 +133,28 @@ class DataReader(object):
                                 lambda (rid, value):rid not in self.__ignore_columns and rid!=self.__target_column, 
                                 enumerate(row))
                             )
-
             x = numpy.array( filter_row )
             x = x.astype(numpy.float32)
-            
 
             self.__X.append(x)
             self.__Y.append(y)
 
+        '''
+        if self.__dv is None:
+            self.__dv = DictVectorizer()
+            self.__X = self.__dv.fit_transform(dict_list).toarray().astype(numpy.float32)
+            print >> sys.stderr, self.__dv.get_feature_names()
+        else:
+            self.__X = self.__dv.transform(dict_list).toarray().astype(numpy.float32)
+            print >> sys.stderr, 'Use old DictVectorizer'
+        '''
+
         #self.__target_trans.debug()
-        print >> sys.stderr, 'Data load (%d records)' % len(self.__X)
+        debug = ''
+        for idx in self.__X[0].nonzero()[0]:
+            debug += '%d:%.1f, ' % (idx, self.__X[0][idx])
+        print >> sys.stderr, debug
+        print >> sys.stderr, 'Data load [ %d(records) x %d(features) ]' % (len(self.__X), len(self.__X[0]))
 
     @property
     def data(self):
@@ -142,42 +178,58 @@ if __name__=='__main__':
 
     train_X = reader.data
     train_Y = reader.target
+    test_X = None
+    test_Y = None
 
     if opt.test:
         reader.read(opt.test)
         test_X = reader.data
         test_Y = reader.target
-    
     else:
-        test_X = train_X
-        test_Y = train_Y
-
+        train_X, test_X, train_Y, test_Y = cross_validation.train_test_split(
+                train_X, train_Y, test_size=0.3, random_state=0)
+   
     from sklearn import svm
     from sklearn import linear_model
     from sklearn import neighbors
     from sklearn import naive_bayes
     from sklearn import tree
+    from sklearn import ensemble
 
     models = (
-        ('svm', svm.SVC() ),
         ('lr', linear_model.LogisticRegression() ),
         ('knn', neighbors.KNeighborsClassifier() ),
         ('gnb', naive_bayes.GaussianNB() ),
-        ('tree', tree.DecisionTreeClassifier() )
+        ('tree', tree.DecisionTreeClassifier() ),
+        ('gbdt', ensemble.GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, max_depth=5, random_state=0) ),
+        ('ada', ensemble.AdaBoostClassifier(n_estimators=100) ),
+        ('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
+        #('svm', svm.SVC() ),
         )
 
     def report(pred, target):
         #print pred[:100]
         #print target[:100]
+        
+        true_negative = len(filter(lambda x:x==0, pred + target))
+        true_positive = len(filter(lambda x:x==2, pred + target))
+        false_positive = len(filter(lambda x:x==1, pred - target))
+        false_negative = len(filter(lambda x:x==-1, pred - target))
+
         diff_count = len(filter(lambda x:x!=0, pred - target))
         precision = (len(target) - diff_count) * 100. / len(target)
+
         print 'Precision: %.2f%% (%d/%d)' % (precision, len(target)-diff_count, len(target))
+        print ' Positive: true:%d false:%d' % (true_positive, false_positive)
+        print ' Negative: true:%d false:%d' % (true_negative, false_negative)
 
     for name, model in models:
         print >> sys.stderr, '====> model [%s] <====' % name
+
         model.fit(train_X, train_Y)
         print >> sys.stderr, 'Training over.'
+
         pred = model.predict(test_X)
         print >> sys.stderr, 'Predict over.'
         report(pred, test_Y)
-        
+    
