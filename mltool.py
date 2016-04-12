@@ -9,6 +9,7 @@ import numpy
 import sklearn
 from sklearn import cross_validation
 from sklearn.feature_extraction import DictVectorizer
+#from sklearn import preprocessing
 
 import pydev
 
@@ -103,7 +104,6 @@ class DataReader(object):
             row = map(lambda x:x.strip(), row)
 
 
-            '''
             # get x dict.
             x_dict = {}
             for cid, value in enumerate(row):
@@ -138,8 +138,8 @@ class DataReader(object):
 
             self.__X.append(x)
             self.__Y.append(y)
+            '''
 
-        '''
         if self.__dv is None:
             self.__dv = DictVectorizer()
             self.__X = self.__dv.fit_transform(dict_list).toarray().astype(numpy.float32)
@@ -147,13 +147,15 @@ class DataReader(object):
         else:
             self.__X = self.__dv.transform(dict_list).toarray().astype(numpy.float32)
             print >> sys.stderr, 'Use old DictVectorizer'
-        '''
 
+        #self.__X = preprocessing.maxabs_scale(self.__X)
         #self.__target_trans.debug()
+        '''
         debug = ''
         for idx in self.__X[0].nonzero()[0]:
             debug += '%d:%.1f, ' % (idx, self.__X[0][idx])
         print >> sys.stderr, debug
+        '''
         print >> sys.stderr, 'Data load [ %d(records) x %d(features) ]' % (len(self.__X), len(self.__X[0]))
 
     @property
@@ -195,8 +197,9 @@ if __name__=='__main__':
     from sklearn import naive_bayes
     from sklearn import tree
     from sklearn import ensemble
+    from mylog import LogisticLayer
 
-    models = (
+    '''
         ('lr', linear_model.LogisticRegression() ),
         ('knn', neighbors.KNeighborsClassifier() ),
         ('gnb', naive_bayes.GaussianNB() ),
@@ -205,12 +208,14 @@ if __name__=='__main__':
         ('ada', ensemble.AdaBoostClassifier(n_estimators=100) ),
         ('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
         #('svm', svm.SVC() ),
-        )
+    '''
+
+    models = [
+        #('lr', linear_model.LogisticRegression() ),
+        ('mylog', LogisticLayer(dim=len(train_X[0]), output_01=True) )
+        ]
 
     def report(pred, target):
-        #print pred[:100]
-        #print target[:100]
-        
         true_negative = len(filter(lambda x:x==0, pred + target))
         true_positive = len(filter(lambda x:x==2, pred + target))
         false_positive = len(filter(lambda x:x==1, pred - target))
@@ -219,7 +224,7 @@ if __name__=='__main__':
         diff_count = len(filter(lambda x:x!=0, pred - target))
         precision = (len(target) - diff_count) * 100. / len(target)
 
-        print 'Precision: %.2f%% (%d/%d)' % (precision, len(target)-diff_count, len(target))
+        print 'Accuracy : %.2f%% (%d/%d)' % (precision, len(target)-diff_count, len(target))
         print ' Positive: true:%d false:%d' % (true_positive, false_positive)
         print ' Negative: true:%d false:%d' % (true_negative, false_negative)
 
