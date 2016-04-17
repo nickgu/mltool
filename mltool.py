@@ -197,7 +197,7 @@ if __name__=='__main__':
     from sklearn import naive_bayes
     from sklearn import tree
     from sklearn import ensemble
-    from mylog import LogisticLayer
+    from simple_nn import LogisticClassifier
 
     '''
         ('lr', linear_model.LogisticRegression() ),
@@ -212,7 +212,7 @@ if __name__=='__main__':
 
     models = [
         #('lr', linear_model.LogisticRegression() ),
-        ('mylog', LogisticLayer(dim=len(train_X[0]), output_01=True) )
+        ('mylog', LogisticClassifier(dim=len(train_X[0]), output_01=True) )
         ]
 
     def report(pred, target):
