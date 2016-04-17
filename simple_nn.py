@@ -24,7 +24,7 @@ class SimpleLayer:
     def __init__(self, input, n_in, n_out, batch_size=512):
         #X = T.fmatrix('X')
         X = input
-        W = theano.shared(value=numpy.random.rand(n_in, n_out).astype(numpy.float32) - 0.5, borrow=True)
+        W = theano.shared(value=numpy.random.rand(n_in, n_out) - 0.5, borrow=True)
         b = theano.shared(value=numpy.random.rand(n_out), borrow=True)
 
         self.W = W
@@ -35,50 +35,52 @@ class SimpleLayer:
         self.Y = T.nnet.sigmoid( T.dot(X, W) + numpy.ones( (batch_size, n_out) ) * b )
 
         # Function Definition.
-        self.active = theano.function([X], out)
+        self.active = theano.function([X], self.Y)
 
     def make_updates(self, updates, cost, learning_rate):
         gy_w = T.grad(cost=cost, wrt=self.W)
         gy_b = T.grad(cost=cost, wrt=self.b)
-        updates.append( (w, w - learning_rate * gy_w) )
-        updates.append( (b, b - learning_rate * gy_b) )
+        updates.append( (self.W, self.W - learning_rate * gy_w) )
+        updates.append( (self.b, self.b - learning_rate * gy_b) )
 
 class SimpleNetwork:
     def __init__(self, n_in, hidden_layers_width, batch_size=512, learning_rate=0.1, output_01=False):
-        width = [n_in] + hidden_layers_width + [1]
         self.__learning_rate = learning_rate
 
-        self.__layers = []
+        self.layers = []
         self.X = T.fmatrix()
         
         # build network.
-        last_layer = self.X
-        for i in range(width)-1:
+        last_layer_output = self.X
+        width = [n_in] + hidden_layers_width + [1]
+        for i in range(len(width)-1):
+            print >> sys.stderr, 'Build network: %dx%d' % (width[i], width[i+1])
             l = SimpleLayer(
-                    input=last_layer,
+                    input=last_layer_output,
                     n_in=width[i], 
                     n_out=width[i+1], 
                     batch_size=batch_size)
             last_layer = l
-            self.__layers.append(l)
+            last_layer_output = l.Y
+            self.layers.append(l)
         
         # network output.
-        self.output = last_layer.output
-        self.active = last_layer.active
+        self.Y = last_layer.Y
+        self.active = theano.function([self.X], self.Y)
 
         #### cost function ####
         # label.
-        label = T.fvector() 
+        label = T.fmatrix() 
         # LogLikelihood
-        cost = -T.mean(label * T.log(self.output) + (1-label) * T.log( (1-self.output) ))
+        cost = -T.mean(label * T.log(self.Y) + (1-label) * T.log( (1-self.Y) ))
         # RMSE
-        #cost = T.mean( (label - self.output) ** 2 )
+        #cost = T.mean( (label - self.Y) ** 2 )
 
         updates = []
-        for l in self.__layers:
-            l.make_updates(updates, cost, self.learning_rate)
+        for l in self.layers:
+            l.make_updates(updates, cost, self.__learning_rate)
         self.train = theano.function( 
-                [X, label], 
+                [self.X, label], 
                 cost,
                 updates = updates
                 )
