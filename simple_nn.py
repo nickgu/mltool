@@ -21,10 +21,10 @@ members:
     active: active function.
 '''
 class SimpleLayer:
-    def __init__(self, input, n_in, n_out, batch_size=512):
-        #X = T.fmatrix('X')
+    def __init__(self, input, n_in, n_out, tanh=False):
         X = input
-        W = theano.shared(value=numpy.random.rand(n_in, n_out) - 0.5, borrow=True)
+        print X
+        W = theano.shared(value=(numpy.random.rand(n_in, n_out)-0.5), borrow=True)
         b = theano.shared(value=numpy.random.rand(n_out), borrow=True)
 
         self.W = W
@@ -32,7 +32,10 @@ class SimpleLayer:
 
         #### Active function ####
         # logit function.
-        self.Y = T.nnet.sigmoid( T.dot(X, W) + numpy.ones( (batch_size, n_out) ) * b )
+        self.Y = T.nnet.sigmoid( T.dot(X, W) + b )
+        # tanh function.
+        if tanh:
+            self.Y = T.tanh( T.dot(X, W) + b )
 
         # Function Definition.
         self.active = theano.function([X], self.Y)
@@ -46,6 +49,7 @@ class SimpleLayer:
 class SimpleNetwork:
     def __init__(self, n_in, hidden_layers_width, batch_size=512, learning_rate=0.1, output_01=False):
         self.__learning_rate = learning_rate
+        self.__output_01 = output_01
 
         self.layers = []
         self.X = T.fmatrix()
@@ -54,12 +58,16 @@ class SimpleNetwork:
         last_layer_output = self.X
         width = [n_in] + hidden_layers_width + [1]
         for i in range(len(width)-1):
-            print >> sys.stderr, 'Build network: %dx%d' % (width[i], width[i+1])
+            use_tanh=True
+            if i == len(width)-2:
+                use_tanh=False
+
+            print >> sys.stderr, 'Build network: %dx%d %s' % (width[i], width[i+1], 'tanh' if use_tanh else 'sigmoid')
             l = SimpleLayer(
                     input=last_layer_output,
                     n_in=width[i], 
-                    n_out=width[i+1], 
-                    batch_size=batch_size)
+                    n_out=width[i+1],
+                    tanh=use_tanh)
             last_layer = l
             last_layer_output = l.Y
             self.layers.append(l)
@@ -76,6 +84,10 @@ class SimpleNetwork:
         # RMSE
         #cost = T.mean( (label - self.Y) ** 2 )
 
+        # Train function.
+        # NOTICE: train input:
+        #   X : matrix with rows: batch_size, columns: features num.
+        #   Y : matrix with rows: batch_size, columns: 0/1 (one-hot not supported).
         updates = []
         for l in self.layers:
             l.make_updates(updates, cost, self.__learning_rate)
@@ -90,30 +102,37 @@ class SimpleNetwork:
         if do_scale:
             X = preprocessing.maxabs_scale(X)
         pred = self.active(X) 
+        pred.shape = [pred.shape[0]]
         if self.__output_01:
             return numpy.array(map(lambda x:1. if x>=.5 else 0., pred))
         else:
             return pred
 
-    def fit(self, X, y, do_scale=True):
+    def fit(self, X, y, do_scale=True, batch_size=512):
         if do_scale:
             X = preprocessing.maxabs_scale(X)
-        batch_num = (len(X) + self.__batch_size - 1) / self.__batch_size
+        batch_num = (len(X) + batch_size - 1) / batch_size
 
         last_loss = None
         epoch = 0
-        while 1:
+        #while 1:
+        for i in range(120):
             epoch += 1
 
             epoch_cost = 0
             for batch in range(batch_num):
-                beg = batch * self.__batch_size
-                end = beg + self.__batch_size
-                epoch_cost += self.train(X[beg:end], y[beg:end])
+                beg = batch * batch_size
+                end = beg + batch_size
+                # try to cast label.
+                label = numpy.array(y[beg:end]).astype(numpy.float32)
+                if len(label.shape) == 1:
+                    label.shape = (label.shape[0], 1)
+                epoch_cost += self.train(X[beg:end], label)
 
             loss = epoch_cost / batch_num
             print >> sys.stderr, 'Epoch[%d] loss : %f' % (epoch, loss)
             if last_loss is not None:
+                '''
                 if last_loss - loss < 1e-5:
                     print >> sys.stderr, 'Early stop'
                     break
@@ -121,14 +140,14 @@ class SimpleNetwork:
                     self.__learning_rate = self.__learning_rate * 0.5
                     print >> sys.stderr, 'Change learning rate : %f (%f)' % (self.__learning_rate,
                             last_loss - loss)
+                '''
             last_loss = loss
 
 class LogisticClassifier:
-    def __init__(self, dim, learning_rate=0.1, output_01=False, batch_size=512):
+    def __init__(self, dim, learning_rate=0.1, output_01=False):
         self.__dim = dim
         self.__learning_rate = learning_rate
         self.__output_01 = output_01
-        self.__batch_size = batch_size
 
         X = T.fmatrix('X')
         w = theano.shared(value=numpy.random.rand(dim).astype(numpy.float32) - 0.5, borrow=True)
@@ -140,7 +159,7 @@ class LogisticClassifier:
 
         #### active function ####
         # logit function.
-        out = T.nnet.sigmoid( T.dot(X, w) + numpy.ones(shape=batch_size) * b )
+        out = T.nnet.sigmoid( T.dot(X, w) + b )
 
         #### cost function ####
         # LogLikelihood
@@ -190,10 +209,10 @@ class LogisticClassifier:
             return pred
 
     # same interface as sklearn-model.
-    def fit(self, X, y, do_scale=True):
+    def fit(self, X, y, do_scale=True, batch_size=512):
         if do_scale:
             X = preprocessing.maxabs_scale(X)
-        batch_num = (len(X) + self.__batch_size - 1) / self.__batch_size
+        batch_num = (len(X) + batch_size - 1) / batch_size
 
         last_loss = None
         epoch = 0
@@ -202,8 +221,8 @@ class LogisticClassifier:
 
             epoch_cost = 0
             for batch in range(batch_num):
-                beg = batch * self.__batch_size
-                end = beg + self.__batch_size
+                beg = batch * batch_size
+                end = beg + batch_size
                 epoch_cost += self.train(X[beg:end], y[beg:end])
 
             loss = epoch_cost / batch_num

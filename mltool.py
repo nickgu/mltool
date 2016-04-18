@@ -198,6 +198,7 @@ if __name__=='__main__':
     from sklearn import tree
     from sklearn import ensemble
     from simple_nn import LogisticClassifier
+    from simple_nn import SimpleNetwork
 
     '''
         ('lr', linear_model.LogisticRegression() ),
@@ -212,10 +213,13 @@ if __name__=='__main__':
 
     models = [
         #('lr', linear_model.LogisticRegression() ),
-        ('mylog', LogisticClassifier(dim=len(train_X[0]), output_01=True) )
+        #('mylog', LogisticClassifier(dim=len(train_X[0]), output_01=True) ),
+        ('simp_nn', SimpleNetwork(len(train_X[0]), [128, 128, 128, 128], output_01=True)),
         ]
 
     def report(pred, target):
+        print pred[:50]
+        print target[:50]
         true_negative = len(filter(lambda x:x==0, pred + target))
         true_positive = len(filter(lambda x:x==2, pred + target))
         false_positive = len(filter(lambda x:x==1, pred - target))
