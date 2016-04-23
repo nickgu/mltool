@@ -22,6 +22,9 @@ members:
 '''
 class SimpleLayer:
     def __init__(self, input, n_in, n_out, tanh=False):
+        self.n_in = n_in
+        self.n_out = n_out
+
         X = input
         print X
         W = theano.shared(value=(numpy.random.rand(n_in, n_out)-0.5), borrow=True)
@@ -40,11 +43,28 @@ class SimpleLayer:
         # Function Definition.
         self.active = theano.function([X], self.Y)
 
-    def make_updates(self, updates, cost, learning_rate):
+        # Regularization.
+        self.reg = T.sum(W ** 2) + T.sum(b ** 2)
+
+    def make_updates(self, updates, cost, learning_rate, use_sgd=True):
         gy_w = T.grad(cost=cost, wrt=self.W)
         gy_b = T.grad(cost=cost, wrt=self.b)
-        updates.append( (self.W, self.W - learning_rate * gy_w) )
-        updates.append( (self.b, self.b - learning_rate * gy_b) )
+
+        # SGD
+        if use_sgd:
+            updates.append( (self.W, self.W - learning_rate * gy_w) )
+            updates.append( (self.b, self.b - learning_rate * gy_b) )
+        else:
+            # Ada-delta
+            # Learning method: ada-delta 
+            E_gw = theano.shared(value=numpy.zeros(shape=(self.n_in, self.n_out)), borrow=True)
+            E_gb = theano.shared(value=numpy.zeros(self.n_out), borrow=True)
+
+            updates.append( (self.W, self.W - 0.1 / T.sqrt(E_gw + 0.1) * gy_w) )
+            updates.append( (self.b, self.b - 0.1 / T.sqrt(E_gb + 0.1) * gy_b) )
+            updates.append( (E_gw, 0.7 * E_gw + 0.3 * gy_w) )
+            updates.append( (E_gb, 0.7 * E_gb + 0.3 * gy_b) )
+
 
 class SimpleNetwork:
     def __init__(self, n_in, hidden_layers_width, batch_size=512, learning_rate=0.1, output_01=False):
@@ -80,9 +100,16 @@ class SimpleNetwork:
         # label.
         label = T.fmatrix() 
         # LogLikelihood
-        cost = -T.mean(label * T.log(self.Y) + (1-label) * T.log( (1-self.Y) ))
+        #cost = -T.mean(label * T.log(self.Y) + (1-label) * T.log( (1-self.Y) ))
         # RMSE
-        #cost = T.mean( (label - self.Y) ** 2 )
+        cost = T.mean( (label - self.Y) ** 2 )
+        
+        # regulazation.
+        reg = 0
+        '''
+        for layer in self.layers:
+            reg = reg + layer.reg
+        '''
 
         # Train function.
         # NOTICE: train input:
@@ -90,7 +117,7 @@ class SimpleNetwork:
         #   Y : matrix with rows: batch_size, columns: 0/1 (one-hot not supported).
         updates = []
         for l in self.layers:
-            l.make_updates(updates, cost, self.__learning_rate)
+            l.make_updates(updates, cost + reg, self.__learning_rate, use_sgd=True)
         self.train = theano.function( 
                 [self.X, label], 
                 cost,
@@ -98,7 +125,7 @@ class SimpleNetwork:
                 )
 
 
-    def predict(self, X, do_scale=True):
+    def predict(self, X, do_scale=False):
         if do_scale:
             X = preprocessing.maxabs_scale(X)
         pred = self.active(X) 
@@ -108,7 +135,7 @@ class SimpleNetwork:
         else:
             return pred
 
-    def fit(self, X, y, do_scale=True, batch_size=512):
+    def fit(self, X, y, do_scale=False, batch_size=512):
         if do_scale:
             X = preprocessing.maxabs_scale(X)
         batch_num = (len(X) + batch_size - 1) / batch_size
@@ -116,7 +143,7 @@ class SimpleNetwork:
         last_loss = None
         epoch = 0
         #while 1:
-        for i in range(120):
+        for i in range(400):
             epoch += 1
 
             epoch_cost = 0
@@ -132,10 +159,10 @@ class SimpleNetwork:
             loss = epoch_cost / batch_num
             print >> sys.stderr, 'Epoch[%d] loss : %f' % (epoch, loss)
             if last_loss is not None:
-                '''
-                if last_loss - loss < 1e-5:
+                if last_loss - loss < 1e-6:
                     print >> sys.stderr, 'Early stop'
                     break
+                '''
                 if self.__learning_rate>=1e-3 and last_loss - loss < 1e-3:
                     self.__learning_rate = self.__learning_rate * 0.5
                     print >> sys.stderr, 'Change learning rate : %f (%f)' % (self.__learning_rate,

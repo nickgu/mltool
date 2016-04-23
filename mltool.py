@@ -9,7 +9,7 @@ import numpy
 import sklearn
 from sklearn import cross_validation
 from sklearn.feature_extraction import DictVectorizer
-#from sklearn import preprocessing
+from sklearn import preprocessing
 
 import pydev
 
@@ -59,6 +59,8 @@ class DataReader(object):
         self.__expect_column_count = int( config.get(section, 'fix_columns', default='-1') )
         self.__target_column = int( config.get(section, 'target_column', default='0') ) - 1
         self.__ignore_first_row = int( config.get(section, 'ignore_first_row', default='0') )
+
+        self.__maxabs_scale = int( config.get(section, 'maxabs_scale', default='0') )
 
         s = config.get(section, 'name_to_id', default='')
         if s:
@@ -139,7 +141,6 @@ class DataReader(object):
             self.__X.append(x)
             self.__Y.append(y)
             '''
-
         if self.__dv is None:
             self.__dv = DictVectorizer()
             self.__X = self.__dv.fit_transform(dict_list).toarray().astype(numpy.float32)
@@ -148,7 +149,10 @@ class DataReader(object):
             self.__X = self.__dv.transform(dict_list).toarray().astype(numpy.float32)
             print >> sys.stderr, 'Use old DictVectorizer'
 
-        #self.__X = preprocessing.maxabs_scale(self.__X)
+        if self.__maxabs_scale:
+            print >> sys.stderr, 'Do maxabs_scale'
+            self.__X = preprocessing.maxabs_scale(self.__X)
+
         #self.__target_trans.debug()
         '''
         debug = ''
@@ -200,26 +204,23 @@ if __name__=='__main__':
     from simple_nn import LogisticClassifier
     from simple_nn import SimpleNetwork
 
-    '''
-        ('lr', linear_model.LogisticRegression() ),
-        ('knn', neighbors.KNeighborsClassifier() ),
-        ('gnb', naive_bayes.GaussianNB() ),
-        ('tree', tree.DecisionTreeClassifier() ),
-        ('gbdt', ensemble.GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, max_depth=5, random_state=0) ),
-        ('ada', ensemble.AdaBoostClassifier(n_estimators=100) ),
-        ('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
-        #('svm', svm.SVC() ),
-    '''
-
     models = [
         #('lr', linear_model.LogisticRegression() ),
+        #('knn', neighbors.KNeighborsClassifier() ),
+        #('gnb', naive_bayes.GaussianNB() ),
+        #('tree', tree.DecisionTreeClassifier() ),
+        #('simple_gbdt', ensemble.GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, max_depth=5, random_state=0) ),
+        #('best_gbdt', ensemble.GradientBoostingClassifier(n_estimators=300, learning_rate=0.05, max_depth=8, random_state=0) ),
+        #('ada', ensemble.AdaBoostClassifier(n_estimators=100) ),
+        #('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
+        #('svm', svm.SVC() ),
+
         #('mylog', LogisticClassifier(dim=len(train_X[0]), output_01=True) ),
-        ('simp_nn', SimpleNetwork(len(train_X[0]), [128, 128, 128, 128], output_01=True)),
+        ('simp_nn', SimpleNetwork(len(train_X[0]), [256, 256, 128], output_01=True)),
+        #('simp_nn_lr', SimpleNetwork(len(train_X[0]), [], output_01=True)),
         ]
 
-    def report(pred, target):
-        print pred[:50]
-        print target[:50]
+    def report(pred, target, out_stream):
         true_negative = len(filter(lambda x:x==0, pred + target))
         true_positive = len(filter(lambda x:x==2, pred + target))
         false_positive = len(filter(lambda x:x==1, pred - target))
@@ -228,9 +229,9 @@ if __name__=='__main__':
         diff_count = len(filter(lambda x:x!=0, pred - target))
         precision = (len(target) - diff_count) * 100. / len(target)
 
-        print 'Accuracy : %.2f%% (%d/%d)' % (precision, len(target)-diff_count, len(target))
-        print ' Positive: true:%d false:%d' % (true_positive, false_positive)
-        print ' Negative: true:%d false:%d' % (true_negative, false_negative)
+        print >> out_stream, 'Accuracy : ### %.2f%% (%d/%d) ###' % (precision, len(target)-diff_count, len(target))
+        print >> out_stream, ' Positive: true:%d false:%d' % (true_positive, false_positive)
+        print >> out_stream, ' Negative: true:%d false:%d' % (true_negative, false_negative)
 
     for name, model in models:
         print >> sys.stderr, '====> model [%s] <====' % name
@@ -238,7 +239,16 @@ if __name__=='__main__':
         model.fit(train_X, train_Y)
         print >> sys.stderr, 'Training over.'
 
+        # TEST: training-set
+        # test for best performance(ignore overfitting.).
+        pred = model.predict(train_X)
+        print >> sys.stderr, 'Predict [Training-set] over.'
+        report(pred, train_Y, sys.stderr)
+
+        # TEST: test-set.
         pred = model.predict(test_X)
-        print >> sys.stderr, 'Predict over.'
-        report(pred, test_Y)
+        print >> sys.stderr, 'Predict [Test-set] over.'
+        report(pred, test_Y, sys.stderr)
+
+
     
