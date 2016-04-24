@@ -7,6 +7,7 @@ import sys
 import numpy
 import theano
 import random
+import time
 
 from sklearn import preprocessing
 from theano import tensor as T
@@ -143,8 +144,9 @@ class SimpleNetwork:
         last_loss = None
         epoch = 0
         while 1:
-            epoch += 1
+            st = time.time()
 
+            epoch += 1
             epoch_cost = 0
             for batch in range(batch_num):
                 beg = batch * batch_size
@@ -155,13 +157,16 @@ class SimpleNetwork:
                     label.shape = (label.shape[0], 1)
                 epoch_cost += self.train(X[beg:end], label)
 
+            dt = time.time() - st
+
             loss = epoch_cost / batch_num
-            diff_loss = None
+            diff_loss = 0
             if last_loss is not None:
                 diff_loss = last_loss - loss
-            print >> sys.stderr, 'Epoch[%d] loss : %f (diff-loss: %f)' % (epoch, loss, diff_loss)
+            print >> sys.stderr, 'Epoch[%d] loss : %f (diff_loss:%f, diff_time:%.3f(s))' % (
+                    epoch, loss, diff_loss, dt)
             if last_loss is not None:
-                if last_loss - loss < 1e-6:
+                if last_loss - loss < 1e-5:
                     print >> sys.stderr, 'Early stop'
                     break
 

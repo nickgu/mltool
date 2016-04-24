@@ -59,11 +59,11 @@ if __name__=='__main__':
         #('simple_gbdt', ensemble.GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, max_depth=5, random_state=0) ),
         #('best_gbdt', ensemble.GradientBoostingClassifier(n_estimators=300, learning_rate=0.05, max_depth=8, random_state=0) ),
         #('ada', ensemble.AdaBoostClassifier(n_estimators=100) ),
-        #('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
+        ('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
         #('svm', svm.SVC() ),
 
         #('mylog', LogisticClassifier(dim=len(train_X[0]), output_01=True) ),
-        ('simp_nn', SimpleNetwork(len(train_X[0]), [256, 256, 128], output_01=True)),
+        #('simp_nn', SimpleNetwork(len(train_X[0]), [256, 256, 128], output_01=True)),
         #('simp_nn_lr', SimpleNetwork(len(train_X[0]), [], output_01=True)),
         ]
 
