@@ -142,8 +142,7 @@ class SimpleNetwork:
 
         last_loss = None
         epoch = 0
-        #while 1:
-        for i in range(400):
+        while 1:
             epoch += 1
 
             epoch_cost = 0
@@ -157,11 +156,15 @@ class SimpleNetwork:
                 epoch_cost += self.train(X[beg:end], label)
 
             loss = epoch_cost / batch_num
-            print >> sys.stderr, 'Epoch[%d] loss : %f' % (epoch, loss)
+            diff_loss = None
+            if last_loss is not None:
+                diff_loss = last_loss - loss
+            print >> sys.stderr, 'Epoch[%d] loss : %f (diff-loss: %f)' % (epoch, loss, diff_loss)
             if last_loss is not None:
                 if last_loss - loss < 1e-6:
                     print >> sys.stderr, 'Early stop'
                     break
+
                 '''
                 if self.__learning_rate>=1e-3 and last_loss - loss < 1e-3:
                     self.__learning_rate = self.__learning_rate * 0.5

@@ -187,12 +187,18 @@ class DataReader(object):
         names = self.__dv.get_feature_names()
         for id in range(len(X[0])):
             feature_name = names[id]
-            auc = metrics.roc_auc_score(
-                    Y,
-                    map(lambda x:x[id], X))
-            print >> out_stream, '%s\t%.3f' % (
+            pred_Y = map(lambda x:x[id], X)
+
+            auc = metrics.roc_auc_score(Y, pred_Y)
+            precision = metrics.precision_score(Y, map(lambda x:1 if x>0.5 else 0, pred_Y))
+            recall = metrics.recall_score(Y, map(lambda x:1 if x>0.5 else 0, pred_Y))
+
+            print >> out_stream, '%s\t%.3f\t%.3f\t%.3f' % (
                     feature_name.replace('#0', '#').replace('#0', '#'),
-                    auc)
+                    auc, 
+                    precision,
+                    recall,
+                    )
 
 if __name__=='__main__':
     pass

@@ -52,7 +52,7 @@ if __name__=='__main__':
     from simple_nn import SimpleNetwork
 
     models = [
-        ('lr', linear_model.LogisticRegression() ),
+        #('lr', linear_model.LogisticRegression() ),
         #('knn', neighbors.KNeighborsClassifier() ),
         #('gnb', naive_bayes.GaussianNB() ),
         #('tree', tree.DecisionTreeClassifier() ),
@@ -63,7 +63,7 @@ if __name__=='__main__':
         #('svm', svm.SVC() ),
 
         #('mylog', LogisticClassifier(dim=len(train_X[0]), output_01=True) ),
-        #('simp_nn', SimpleNetwork(len(train_X[0]), [256, 256, 128], output_01=True)),
+        ('simp_nn', SimpleNetwork(len(train_X[0]), [256, 256, 128], output_01=True)),
         #('simp_nn_lr', SimpleNetwork(len(train_X[0]), [], output_01=True)),
         ]
 
