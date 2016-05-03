@@ -22,6 +22,11 @@ if __name__=='__main__':
     for section in config.sections():
         if section == 'output':
             continue
+
+        enable = int(config.get(section, 'enable'))
+        if not enable:
+            print >> sys.stderr, 'Ignore dataset [%s]' % section
+            continue
         
         print >> sys.stderr, 'Process dataset [%s]' % section
         sub_path = config.get(section, 'path')
