@@ -41,6 +41,7 @@ class DataReader(object):
         self.__ignore_columns = set()
         self.__target_trans = NameIDTransformer()
         self.__dv = None
+        self.__maxabs_scale = 0
 
         self.__X = []
         self.__Y = []
@@ -150,6 +151,9 @@ class DataReader(object):
         if self.__maxabs_scale:
             print >> sys.stderr, 'Do maxabs_scale'
             self.__X = preprocessing.maxabs_scale(self.__X)
+
+        # make Y as ndarray
+        self.__Y = numpy.array(self.__Y)
 
         #self.__target_trans.debug()
         '''

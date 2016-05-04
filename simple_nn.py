@@ -68,7 +68,7 @@ class SimpleLayer:
 
 
 class SimpleNetwork:
-    def __init__(self, n_in, hidden_layers_width, batch_size=512, learning_rate=0.1, output_01=False):
+    def __init__(self, n_in, n_out, hidden_layers_width, batch_size=512, learning_rate=0.1, output_01=False):
         self.__learning_rate = learning_rate
         self.__output_01 = output_01
 
@@ -77,7 +77,7 @@ class SimpleNetwork:
         
         # build network.
         last_layer_output = self.X
-        width = [n_in] + hidden_layers_width + [1]
+        width = [n_in] + hidden_layers_width + [n_out]
         for i in range(len(width)-1):
             use_tanh=True
             if i == len(width)-2:
@@ -130,11 +130,11 @@ class SimpleNetwork:
         if do_scale:
             X = preprocessing.maxabs_scale(X)
         pred = self.active(X) 
-        pred.shape = [pred.shape[0]]
+
         if self.__output_01:
-            return numpy.array(map(lambda x:1. if x>=.5 else 0., pred))
-        else:
-            return pred
+            for x in numpy.nditer(pred, op_flags=['readwrite']):
+                x[...] = 1. if x[...]>=.5 else 0.
+        return pred
 
     def fit(self, X, y, do_scale=False, batch_size=512):
         if do_scale:
@@ -177,6 +177,11 @@ class SimpleNetwork:
                             last_loss - loss)
                 '''
             last_loss = loss
+
+    '''
+    '''
+    #def interactive_fit(self, X, y):
+
 
 class LogisticClassifier:
     def __init__(self, dim, learning_rate=0.1, output_01=False):

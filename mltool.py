@@ -56,18 +56,24 @@ if __name__=='__main__':
         #('knn', neighbors.KNeighborsClassifier() ),
         #('gnb', naive_bayes.GaussianNB() ),
         #('tree', tree.DecisionTreeClassifier() ),
-        #('simple_gbdt', ensemble.GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, max_depth=5, random_state=0) ),
+        ('simple_gbdt', ensemble.GradientBoostingClassifier(n_estimators=50, learning_rate=0.1, max_depth=5, random_state=0) ),
         #('best_gbdt', ensemble.GradientBoostingClassifier(n_estimators=300, learning_rate=0.05, max_depth=8, random_state=0) ),
         #('ada', ensemble.AdaBoostClassifier(n_estimators=100) ),
-        ('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
+        #('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
         #('svm', svm.SVC() ),
-
         #('mylog', LogisticClassifier(dim=len(train_X[0]), output_01=True) ),
         #('simp_nn', SimpleNetwork(len(train_X[0]), [256, 256, 128], output_01=True)),
+        #('simp_nn', SimpleNetwork( len(train_X[0]), 1, [12, 12], output_01=True)),
         #('simp_nn_lr', SimpleNetwork(len(train_X[0]), [], output_01=True)),
         ]
 
     def report(pred, target, X, reader, error_writer, out_stream):
+
+        if len(pred.shape) > len(target.shape):
+            # try to flatten.
+            print >> sys.stderr, 'Force flatten! [%s] => [%s]' % (pred.shape, target.shape)
+            pred.shape = target.shape
+
         true_negative = len(filter(lambda x:x==0, pred + target))
         true_positive = len(filter(lambda x:x==2, pred + target))
         false_positive = len(filter(lambda x:x==1, pred - target))

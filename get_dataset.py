@@ -9,6 +9,26 @@ import ConfigParser
 
 import pydev
 
+import numpy
+
+
+class CircleData:
+    def __init__(self, dim=2):
+        self.__dim = dim
+
+        # radius in [0.5, 0.7)
+        self.__radius = numpy.random.random( (self.__dim, ) ) * 0.5 + 0.2
+        print >> sys.stderr, 'Radius' + str(self.__radius)
+
+    def generate_data(self, num, output_stream):
+        for i in range(num):
+            x = (numpy.random.random( (self.__dim, ) ) - 0.5) * 2.
+            if (numpy.abs(x) <= self.__radius).all():
+                y = 1.
+            else:
+                y = 0.
+            print >> output_stream,  ','.join( map(lambda v:'%.3f'%v, x) ) +  ',%.0f' % y
+
 if __name__=='__main__':
     config = ConfigParser.ConfigParser()
     config.read(sys.argv[1])
