@@ -52,8 +52,8 @@ if __name__=='__main__':
     from simple_nn import SimpleNetwork
 
     models = [
-        ('lr', linear_model.LogisticRegression() ),
-        ('knn', neighbors.KNeighborsClassifier() ),
+        #('lr', linear_model.LogisticRegression() ),
+        #('knn', neighbors.KNeighborsClassifier() ),
         #('gnb', naive_bayes.GaussianNB() ),
         #('tree', tree.DecisionTreeClassifier() ),
         #('simple_gbdt', ensemble.GradientBoostingClassifier(n_estimators=50, learning_rate=0.1, max_depth=5, random_state=0) ),
@@ -62,7 +62,7 @@ if __name__=='__main__':
         #('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
         #('svm', svm.SVC() ),
         #('mylog', LogisticClassifier(dim=len(train_X[0]), output_01=True) ),
-        #('simp_nn', SimpleNetwork(len(train_X[0]), [256, 256, 128], output_01=True)),
+        ('simp_nn', SimpleNetwork(len(train_X[0]), 1, [256, 256, 128], output_01=True)),
         #('simp_nn', SimpleNetwork( len(train_X[0]), 1, [12, 12], output_01=True)),
         #('simp_nn_lr', SimpleNetwork(len(train_X[0]), [], output_01=True)),
         ]

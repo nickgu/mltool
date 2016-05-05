@@ -39,6 +39,9 @@ class NameIDTransformer:
     def name(self, id):
         return self.__names[id]
 
+    def size(self):
+        return len(self.__names)
+
     def debug(self):
         print >> sys.stderr, self.__names
 
@@ -92,9 +95,9 @@ class DataReader(object):
 
         self.__maxabs_scale = int( config.get(section, 'maxabs_scale', default='0') )
 
-        s = config.get(section, 'name_to_id', default='')
+        s = config.get(section, 'concrete_ids', default='')
         if s:
-            self.__name_to_id_dict = dict( map(lambda x:(int(x)-1, NameIDTransformer()), s.split(',')) )
+            self.__concrete_ids = set( map(lambda x:int(x)-1, s.split(',')) )
 
         s = config.get(section, 'ignore_columns', default='')
         if s:
@@ -107,7 +110,7 @@ class DataReader(object):
         print >> sys.stderr, 'seperator : [%s]' % self.__seperator
         print >> sys.stderr, 'columns : %d (-1 : indicates from first useable row)' % self.__expect_column_count
         print >> sys.stderr, 'target  : %d (0 based, -1 indicates last column)' % self.__target_column
-        print >> sys.stderr, 'name_to_id : %s' % (','.join(map(str, self.__name_to_id_dict.keys())))
+        print >> sys.stderr, 'concrete_ids : %s' % (','.join(map(str, self.__concrete_ids)))
         print >> sys.stderr, 'ignore_columns : %s' % (','.join(map(str, self.__ignore_columns)))
         print >> sys.stderr, 'ignore_first_row : %d' % self.__ignore_first_row
 
@@ -116,9 +119,9 @@ class DataReader(object):
         self.__Y = []
         first_row = True
 
-        max_x_size = 0
         fd = file(filename)
         progress = pydev.FileProgress(fd, filename)
+        raw_X = []
         for row in pydev.foreach_row(fd, seperator=self.__seperator):
             progress.check_progress()
 
@@ -164,17 +167,17 @@ class DataReader(object):
                 else:
                     # feature = id : value
                     fid, value = self.__feature_trans.allocate_id('#%03d' % (cid)), float(value)
-                
+
                 id_value.append( (fid, value) )
                 if v_size < fid+1:
                     v_size = fid+1 
 
             x = numpy.ndarray(shape=(v_size,))
+            x.fill(0)
             for fid, value in id_value:
-                x[fid] = value
-            self.__X.append(x)
-            if v_size > max_x_size:
-                max_x_size = v_size
+                x[fid] = float(value)
+
+            raw_X.append(x)
 
             # get Y
             row[self.__target_column] = self.__target_trans.allocate_id( row[self.__target_column] )
@@ -183,8 +186,15 @@ class DataReader(object):
 
         
         # resize for each X.
-        for i in range(len(self.__X)):
-            self.__X[i].resize( max_x_size )
+        x_size = self.__feature_trans.size()
+        for x in raw_X:
+            new_x = numpy.ndarray(shape=(x_size,), dtype=numpy.float32)
+            new_x.fill(0)
+            new_x[:x.shape[0]] = x
+            self.__X.append( new_x )
+
+        # transform X to numpy.ndarray
+        self.__X = numpy.array(self.__X)
 
         # preprocessing.
         if self.__maxabs_scale:
@@ -192,7 +202,7 @@ class DataReader(object):
             self.__X = preprocessing.maxabs_scale(self.__X)
 
         # make Y as ndarray
-        self.__Y = numpy.array(self.__Y)
+        self.__Y = numpy.array(self.__Y).astype(numpy.float32)
 
         #self.__feature_trans.debug()
         #self.__target_trans.debug()

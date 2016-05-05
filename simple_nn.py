@@ -152,7 +152,7 @@ class SimpleNetwork:
                 beg = batch * batch_size
                 end = beg + batch_size
                 # try to cast label.
-                label = numpy.array(y[beg:end]).astype(numpy.float32)
+                label = numpy.array(y[beg:end])#.astype(numpy.float32)
                 if len(label.shape) == 1:
                     label.shape = (label.shape[0], 1)
                 epoch_cost += self.train(X[beg:end], label)
