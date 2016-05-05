@@ -12,11 +12,22 @@ from sklearn import preprocessing
 from sklearn import metrics
 
 class NameIDTransformer:
+    '''
+    allocate continuous ID to concrete-value.
+    Usage:
+        t = NameIDTransformer()
+        # first allocate.
+        id = t.allocate_id(name)
+        # search:
+        id = t.id(name)
+        name = t.name(id)
+    '''
+
     def __init__(self):
         self.__mapping = {}
         self.__names = []
 
-    def read(self, name):
+    def allocate_id(self, name):
         if name not in self.__mapping:
             self.__mapping[name] = len(self.__names)
             self.__names.append(name)
@@ -32,16 +43,36 @@ class NameIDTransformer:
         print >> sys.stderr, self.__names
 
 class DataReader(object):
+    '''
+    Read data from files.
+    Usage:
+        reader = DataReader()
+        # if needed.
+        reader.config(config_filename)
+        reader.read(data_file)
+        x, y = reader.data, reader.target
+    '''
+    (DenseValue, IVSparse) = range(2)
+
     def __init__(self):
         self.__seperator = ','
         self.__expect_column_count = -1
         self.__target_column = -1
-        self.__name_to_id_dict = {}
         self.__ignore_first_row = False
+
+
+        # TODO: this is not work for iv-sparse format.
         self.__ignore_columns = set()
+
+        # feature_id need to be concrete.
+        self.__concrete_ids = set()
+        self.__feature_trans = NameIDTransformer()
         self.__target_trans = NameIDTransformer()
-        self.__dv = None
         self.__maxabs_scale = 0
+
+        # default mode 
+        self.__row_mode = DataReader.DenseValue
+        self.__use_id_mapping = False
 
         self.__X = []
         self.__Y = []
@@ -85,15 +116,18 @@ class DataReader(object):
         self.__Y = []
         first_row = True
 
-        dict_list = []
-        for row in pydev.foreach_row(
-                file(filename), 
-                seperator=self.__seperator):
+        max_x_size = 0
+        fd = file(filename)
+        progress = pydev.FileProgress(fd, filename)
+        for row in pydev.foreach_row(fd, seperator=self.__seperator):
+            progress.check_progress()
 
+            # whether to ignore first row.
             if first_row and self.__ignore_first_row:
                 first_row = False
                 continue
 
+            # check column count.
             if self.__expect_column_count < 0:
                 self.__expect_column_count = len(row)
                 if self.__target_column < 0:
@@ -102,52 +136,57 @@ class DataReader(object):
             elif len(row) != self.__expect_column_count:
                     continue
 
+            # strip each columns.
             row = map(lambda x:x.strip(), row)
 
-
             # get x dict.
-            x_dict = {}
-            for cid, value in enumerate(row):
-                if cid == self.__target_column:
+            id_value = []
+            v_size = 0
+            for rid, value in enumerate(row):
+                # continue if target columns.
+                if rid == self.__target_column:
                     continue
-                if cid in self.__name_to_id_dict:
-                    x_dict[ '#%03d' % cid ] = value
+                # continue if filter columns.
+                if rid in self.__ignore_columns:
+                    continue
+
+                # dense and id-value-sparse
+                if self.__row_mode == DataReader.DenseValue:
+                    cid = rid
+                elif self.__row_mode == DataReader.IVSparse:
+                    cid, value = value.split(':')
+                    cid = int(cid)
+
+                if cid in self.__concrete_ids:
+                    # one-hot representation for key.
+                    # feature = id-value : 1
+                    fid, value = self.__feature_trans.allocate_id('#%03d:%s' % (cid, value)), 1
                 else:
-                    x_dict[ '#%03d' % cid ] = float(value)
-            dict_list.append(x_dict)
+                    # feature = id : value
+                    fid, value = self.__feature_trans.allocate_id('#%03d' % (cid)), float(value)
+                
+                id_value.append( (fid, value) )
+                if v_size < fid+1:
+                    v_size = fid+1 
+
+            x = numpy.ndarray(shape=(v_size,))
+            for fid, value in id_value:
+                x[fid] = value
+            self.__X.append(x)
+            if v_size > max_x_size:
+                max_x_size = v_size
 
             # get Y
-            row[self.__target_column] = self.__target_trans.read( row[self.__target_column] )
+            row[self.__target_column] = self.__target_trans.allocate_id( row[self.__target_column] )
             y = row[self.__target_column]
             self.__Y.append(y)
 
-            '''
-            for cid, trans in self.__name_to_id_dict.iteritems():
-                row[cid] = trans.read(row[cid])
+        
+        # resize for each X.
+        for i in range(len(self.__X)):
+            self.__X[i].resize( max_x_size )
 
-            row[self.__target_column] = self.__target_trans.read( row[self.__target_column] )
-            y = row[self.__target_column]
-
-            filter_row = map(
-                            lambda (rid, value): float(value),
-                            filter(
-                                lambda (rid, value):rid not in self.__ignore_columns and rid!=self.__target_column, 
-                                enumerate(row))
-                            )
-            x = numpy.array( filter_row )
-            x = x.astype(numpy.float32)
-
-            self.__X.append(x)
-            self.__Y.append(y)
-            '''
-        if self.__dv is None:
-            self.__dv = DictVectorizer()
-            self.__X = self.__dv.fit_transform(dict_list).toarray().astype(numpy.float32)
-            print >> sys.stderr, self.__dv.get_feature_names()
-        else:
-            self.__X = self.__dv.transform(dict_list).toarray().astype(numpy.float32)
-            print >> sys.stderr, 'Use old DictVectorizer'
-
+        # preprocessing.
         if self.__maxabs_scale:
             print >> sys.stderr, 'Do maxabs_scale'
             self.__X = preprocessing.maxabs_scale(self.__X)
@@ -155,13 +194,9 @@ class DataReader(object):
         # make Y as ndarray
         self.__Y = numpy.array(self.__Y)
 
+        #self.__feature_trans.debug()
         #self.__target_trans.debug()
-        '''
-        debug = ''
-        for idx in self.__X[0].nonzero()[0]:
-            debug += '%d:%.1f, ' % (idx, self.__X[0][idx])
-        print >> sys.stderr, debug
-        '''
+
         print >> sys.stderr, 'Data load [ %d(records) x %d(features) ]' % (len(self.__X), len(self.__X[0]))
 
     @property
@@ -173,24 +208,21 @@ class DataReader(object):
         return self.__Y
 
     def text_format(self, v):
-        if self.__dv is None:
-            raise Exception('Bad text_format call() because the dict_victorizer is invalid.')
         s = []
-        names = self.__dv.get_feature_names()
         for id, value in enumerate(v):
+            name =self.__feature_trans.name(id)
             if value != 0:
                 if value == 1.0:
-                    s.append(names[id])
+                    s.append( name )
                 else:
-                    s.append('%s:%.2f' % (names[id], value))
-        return ', '.join(map(lambda x:x.replace('#0', '#').replace('#0', '#'), sorted(s)))
+                    s.append('%s:%.2f' % (name, value))
+        return ', '.join(sorted(s))
 
     def auc(self, X, Y, out_stream):
-        if self.__dv is None:
-            raise Exception('Bad text_format call() because the dict_victorizer is invalid.')
-        names = self.__dv.get_feature_names()
+        ''' TODO: move it to tools.
+        '''
         for id in range(len(X[0])):
-            feature_name = names[id]
+            feature_name =self.__feature_trans.name(id)
             pred_Y = map(lambda x:x[id], X)
 
             auc = metrics.roc_auc_score(Y, pred_Y)
@@ -198,7 +230,7 @@ class DataReader(object):
             recall = metrics.recall_score(Y, map(lambda x:1 if x>0.5 else 0, pred_Y))
 
             print >> out_stream, '%s\t%.3f\t%.3f\t%.3f' % (
-                    feature_name.replace('#0', '#').replace('#0', '#'),
+                    feature_name,
                     auc, 
                     precision,
                     recall,

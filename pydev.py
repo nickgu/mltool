@@ -3,6 +3,12 @@
 # gusimiu@baidu.com
 #   datemark: 20150428
 #   
+#   V1.3:
+#       add DimAnalysis
+#
+#   V1.2:
+#       add FileProgress
+#
 #   V1.1:
 #       add MailSender and Arg
 #
@@ -55,6 +61,168 @@ DETECTIVE_MSG = 'Are_you_alive?'
 # Part I: pydev library implemention.
 #
 ##############################################################################
+
+class StringTable:
+    def __init__(self, col, sep_col='\t', sep_row='\n', makeup=True):
+        self.__column_num = col
+        self.set_seperator(sep_col, sep_row)
+        self.__makeup = makeup
+        self.__data = []
+
+    def set_seperator(self, sep_col, sep_row):
+        self.__sep_column = sep_col
+        self.__sep_row = sep_row
+
+    def append(self, item):
+        self.__data.append(str(item))
+
+    def set(self, data):
+        self.__data = map(lambda x:str(x), data)
+
+    def __str__(self):
+        out = ''
+        rid = 0
+        cid = 0
+        for i, item in enumerate(self.__data):
+            out += item
+            cid += 1
+            if cid % self.__column_num == 0:
+                out += self.__sep_row
+            else:
+                out += self.__sep_column
+
+        if self.__makeup:
+            rest_col = self.__column_num - ((len(self.__data)-1) % self.__column_num + 1)
+            for i in range(rest_col):
+                out += self.__sep_column
+        return out
+
+class SplitFileWriter:
+    def __init__(self, filename_prefix, records_each_file=50000, header=None):
+        self.__cur_id = 0
+        self.__rec_num = 0
+
+        self.__rec_each_file = records_each_file
+        self.__filename_prefix = filename_prefix
+        self.__header = header
+        self.__fd = None
+        self.__open_next()
+
+    def write(self, line):
+        print >> self.__fd, line
+        self.__rec_num += 1
+        if self.__rec_num >= self.__rec_each_file:
+            self.__open_next()
+
+    def __open_next(self):
+        self.__fd = file('%s.%d' % (self.__filename_prefix, self.__cur_id), 'w')
+        if self.__header:
+            print >> self.__fd, self.__header
+        self.__rec_num = 0
+        self.__cur_id += 1
+
+class DimInfo:
+    def __init__(self, name=None):
+        self.name = name
+        self.distribution = {}
+   
+    def set(self, typename, ratio, score):
+        self.distribution[typename] = [ratio, score]
+
+    def uniform_ratio(self):
+        sum = 0
+        for key, (ratio, score) in self.distribution.iteritems():
+            sum += ratio
+        if sum>0:
+            for key in self.distribution:
+                self.distribution[key][0] = self.distribution[key][0] * 1.0 / sum
+
+    def write(self, stream):
+        print >> stream, '%s\t%s\n' % (json.dumps(self.name), json.dumps(self.distribution))
+
+    def read(self, stream):
+        line = stream.readline()
+        key, value = line.split('\t')
+        self.name = json.loads(key)
+        self.distribution = json.loads(value)
+
+    def score(self):
+        self.uniform_ratio()
+        ret = 0
+        for (ratio, score) in self.distribution.values():
+            ret += ratio * score
+        return ret
+
+    def compare(self, A):
+        ''' analysis what makes diff from A to B. 
+        '''
+        final_score_A = A.score()
+        final_score_B = self.score()
+        print >> sys.stderr, 'score of A: %8.3f' % (final_score_A)
+        print >> sys.stderr, 'score of B: %8.3f' % (final_score_B)
+        print >> sys.stderr, '      diff: %8.3f' % (final_score_B - final_score_A)
+        print >> sys.stderr, '-------------------------------------------'
+
+        # analysis distribution diff.
+        # assume the distribution is not change from A to B.
+        #   then the delta = score_B - score_disA (score is same.)
+        distribution_score = 0
+        score_score = 0
+        top_diff = []
+        for key, (ratio_B, score_B) in self.distribution.iteritems():
+            ratio_A, score_A = A.distribution.get(key, (0, 0))
+            distribution_score += ratio_A * score_B
+            score_score += ratio_B * score_A 
+            diff_score = score_B * ratio_B  - score_A * ratio_A
+            top_diff.append( (key, diff_score, 'B:%.1f%% x %.2f => A:%.1f%% x %.2f' % 
+                (ratio_B*100., score_B, ratio_A*100., score_A  )) )
+
+        for key, (ratio_A, score_A) in A.distribution.iteritems():
+            if key in self.distribution:
+                continue
+            top_diff.append( (key, -score_A*ratio_A, 'B:%.1f%% x %.2f => A:%.1f%% x %.2f' % 
+                (0, 0, ratio_A*100., score_A  )) )
+
+        delta_distribution = final_score_B - distribution_score
+        delta_score = final_score_B - score_score
+        print >> sys.stderr, 'Diff by distribution : %8.3f (%.3f->%.3f)' % (
+                delta_distribution, final_score_B, distribution_score)
+        print >> sys.stderr, 'Diff by score        : %8.3f (%.3f->%.3f)' % (
+                delta_score, final_score_B, score_score)
+
+        print >> sys.stderr, '-------------------------------------------'
+        for key, diff, info in sorted(top_diff, key=lambda x:-abs(x[1]))[:5]:
+            print >> sys.stderr, '%30s\t%8.3f' % (key, diff)
+            print >> sys.stderr, '%30s\t  : %s' % ('', info)
+
+    def debug(self, stream):
+        print >> stream, '----------------[[ %s ]]----------------' % self.name
+        for key, (ratio, score) in sorted(self.distribution.iteritems(), key=lambda x:-x[1][0]):
+            print >> stream, '%30s\t%8.3f\t%5.1f%%' % (key, score, ratio*100.)
+
+class FileProgress:
+    def __init__(self, fd, name=None):
+        self.__fd = fd
+        self.__name = name
+        self.__last_reported = 0
+
+        cur_pos = fd.tell()
+        fd.seek(0, 2)
+        self.__size = fd.tell()
+        fd.seek(cur_pos, 0)
+        print >> sys.stderr, 'FileProgress: File size reported: %d' % self.__size
+
+    def check_progress(self, report_interval=0.0005):
+        if self.__size <= 0:
+            print >> sys.stderr, 'FileProgress: file is stream? I cannot report for stream file.'
+            return 0
+        cur = 1. * self.__fd.tell() / self.__size
+        if cur - self.__last_reported>report_interval:
+            temp_c = (int(cur*100) +3) / 4;
+            sys.stderr.write('%cFileProgress: process |%s>%s| [%s] of %.3f%% (%d/%d)' % (
+                13, '='*temp_c, ' '*(25-temp_c), self.__name, cur*100., self.__fd.tell(), self.__size))
+            self.__last_reported = cur
+        return cur
 
 class MailSender:
     def __init__(self, sendmail='/usr/sbin/sendmail'):
@@ -965,6 +1133,28 @@ def CMD_sendmail(argv):
 
     content = ''.join(file(filename).readlines())
     s.send(receiver, title, content)
+
+def CMD_dimdiff(argv):
+    '''
+    dimdiff: compare the diff between two DimInfo file.
+        dimdiff <filename1> <filename2>
+    '''
+    a = DimInfo()
+    a.read(file(argv[0]))
+    b = DimInfo()
+    b.read(file(argv[1]))
+
+    b.compare(a)
+
+def CMD_dimshow(argv):
+    '''
+    dimshow: show dim info of file.
+        dimshow <filename>
+    '''
+    a = DimInfo()
+    a.read(file(argv[0]))
+    a.debug(sys.stderr)
+
 
 if __name__=='__main__':
     logging.basicConfig(level=logging.INFO)

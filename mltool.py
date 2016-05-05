@@ -52,11 +52,11 @@ if __name__=='__main__':
     from simple_nn import SimpleNetwork
 
     models = [
-        #('lr', linear_model.LogisticRegression() ),
-        #('knn', neighbors.KNeighborsClassifier() ),
+        ('lr', linear_model.LogisticRegression() ),
+        ('knn', neighbors.KNeighborsClassifier() ),
         #('gnb', naive_bayes.GaussianNB() ),
         #('tree', tree.DecisionTreeClassifier() ),
-        ('simple_gbdt', ensemble.GradientBoostingClassifier(n_estimators=50, learning_rate=0.1, max_depth=5, random_state=0) ),
+        #('simple_gbdt', ensemble.GradientBoostingClassifier(n_estimators=50, learning_rate=0.1, max_depth=5, random_state=0) ),
         #('best_gbdt', ensemble.GradientBoostingClassifier(n_estimators=300, learning_rate=0.05, max_depth=8, random_state=0) ),
         #('ada', ensemble.AdaBoostClassifier(n_estimators=100) ),
         #('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
