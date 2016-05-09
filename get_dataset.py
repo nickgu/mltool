@@ -29,6 +29,22 @@ class CircleData:
                 y = 0.
             print >> output_stream,  ','.join( map(lambda v:'%.3f'%v, x) ) +  ',%.0f' % y
 
+class MatrixData:
+    def __init__(self, x=5, y=5):
+        self.x = x
+        self.y = y
+        self.matrix = numpy.random.random( (x, y) )
+
+    def generate_data(self, out_stream):
+        for i in range(self.x):
+            f1 = [0] * self.x
+            f1[i] = 1
+            for j in range(self.y):
+                f2 = [0] * self.y
+                f2[j] = 1
+
+                print >> out_stream, '%s,%s,%.5f' % (','.join(map(str,f1)), ','.join(map(str,f2)), self.matrix[i][j])
+
 if __name__=='__main__':
     config = ConfigParser.ConfigParser()
     config.read(sys.argv[1])

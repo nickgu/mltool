@@ -224,6 +224,9 @@ class FileProgress:
             self.__last_reported = cur
         return cur
 
+    def end_progress(self):
+        print >> sys.stderr, '\nProgress [%s] is over.' % (self.__name)
+
 class MailSender:
     def __init__(self, sendmail='/usr/sbin/sendmail'):
         self.__cmd = sendmail

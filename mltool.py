@@ -48,7 +48,6 @@ if __name__=='__main__':
     from sklearn import naive_bayes
     from sklearn import tree
     from sklearn import ensemble
-    from simple_nn import LogisticClassifier
     from simple_nn import SimpleNetwork
 
     models = [
@@ -61,7 +60,6 @@ if __name__=='__main__':
         #('ada', ensemble.AdaBoostClassifier(n_estimators=100) ),
         #('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
         #('svm', svm.SVC() ),
-        #('mylog', LogisticClassifier(dim=len(train_X[0]), output_01=True) ),
         ('simp_nn', SimpleNetwork(len(train_X[0]), 1, [256, 256, 128], output_01=True)),
         #('simp_nn', SimpleNetwork( len(train_X[0]), 1, [12, 12], output_01=True)),
         #('simp_nn_lr', SimpleNetwork(len(train_X[0]), [], output_01=True)),

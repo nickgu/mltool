@@ -69,6 +69,7 @@ class DataReader(object):
 
         # feature_id need to be concrete.
         self.__concrete_ids = set()
+        self.__concrete_target = False
         self.__feature_trans = NameIDTransformer()
         self.__target_trans = NameIDTransformer()
         self.__maxabs_scale = 0
@@ -94,10 +95,12 @@ class DataReader(object):
         self.__ignore_first_row = int( config.get(section, 'ignore_first_row', default='0') )
 
         self.__maxabs_scale = int( config.get(section, 'maxabs_scale', default='0') )
+        self.__concrete_target = int( config.get(section, 'concrete_target', default='0') )
 
         s = config.get(section, 'concrete_ids', default='')
         if s:
             self.__concrete_ids = set( map(lambda x:int(x)-1, s.split(',')) )
+
 
         s = config.get(section, 'ignore_columns', default='')
         if s:
@@ -111,6 +114,7 @@ class DataReader(object):
         print >> sys.stderr, 'columns : %d (-1 : indicates from first useable row)' % self.__expect_column_count
         print >> sys.stderr, 'target  : %d (0 based, -1 indicates last column)' % self.__target_column
         print >> sys.stderr, 'concrete_ids : %s' % (','.join(map(str, self.__concrete_ids)))
+        print >> sys.stderr, 'concrete_target : %d' % (self.__concrete_target)
         print >> sys.stderr, 'ignore_columns : %s' % (','.join(map(str, self.__ignore_columns)))
         print >> sys.stderr, 'ignore_first_row : %d' % self.__ignore_first_row
 
@@ -180,10 +184,12 @@ class DataReader(object):
             raw_X.append(x)
 
             # get Y
-            row[self.__target_column] = self.__target_trans.allocate_id( row[self.__target_column] )
+            if self.__concrete_target:
+                row[self.__target_column] = self.__target_trans.allocate_id( row[self.__target_column] )
             y = row[self.__target_column]
             self.__Y.append(y)
 
+        progress.end_progress()
         
         # resize for each X.
         x_size = self.__feature_trans.size()
