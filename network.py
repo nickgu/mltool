@@ -15,6 +15,11 @@ from theano import tensor as T
 import ConfigParser
 
 
+class LearningConfig:
+    def __init__(self, learning_rate=0.1):
+        self.learning_rate = learning_rate
+        self.symbol_learning_rate = T.scalar()
+
 class ILayer:
     '''
     ILayer: layers' interface.
@@ -22,12 +27,12 @@ class ILayer:
     __metaclass__ = ABCMeta
 
     @abstractmethod
-    def make_updates(self, updates, cost):
+    def make_updates(self, updates, cost, learning_config):
         ''' Making updates to parameters. '''
         pass
 
 class Layer_FullConnect(ILayer):
-    def __init__(self, inputs, n_out=3, n_in=5):
+    def __init__(self, inputs, n_in, n_out):
         self.x = inputs[0]
 
         self.w = theano.shared(value=(numpy.random.rand(n_in, n_out)-0.5), borrow=True)
@@ -36,14 +41,15 @@ class Layer_FullConnect(ILayer):
         self.y = self.x.dot(self.w) + self.b
         self.active = theano.function([self.x], self.y)
 
-    def make_updates(self, updates, cost):
-        learning_rate = 0.1
+    def make_updates(self, updates, cost, learning_config):
+        symbol_learning_rate = learning_config.symbol_learning_rate
+
         gy_w = T.grad(cost=cost, wrt=self.w)
         gy_b = T.grad(cost=cost, wrt=self.b)
 
         # SGD
-        updates.append( (self.w, self.w - learning_rate * gy_w) )
-        updates.append( (self.b, self.b - learning_rate * gy_b) )
+        updates.append( (self.w, self.w - gy_w * symbol_learning_rate) )
+        updates.append( (self.b, self.b - gy_b * symbol_learning_rate) )
 
 class Layer_Dot(ILayer):
     def __init__(self, inputs):
@@ -52,7 +58,7 @@ class Layer_Dot(ILayer):
         self.y = T.batched_dot(self.x1, self.x2)
         self.active = theano.function([self.x1, self.x2], self.y)
 
-    def make_updates(self, updates, cost):
+    def make_updates(self, updates, cost, learning_config):
         ''' no updates '''
         pass
 
@@ -63,7 +69,7 @@ class Layer_Sigmoid(ILayer):
         self.y = T.nnet.sigmoid(x)
         self.active = theano.function([self.x], self.y)
 
-    def make_updates(self, updates, cost):
+    def make_updates(self, updates, cost, learning_config):
         ''' no updates '''
         pass
 
@@ -74,7 +80,7 @@ class Layer_Tanh(ILayer):
         self.y = T.tanh(x)
         self.active = theano.function([self.x], self.y)
 
-    def make_updates(self, updates, cost):
+    def make_updates(self, updates, cost, learning_config):
         ''' no updates '''
         pass
 
@@ -85,51 +91,23 @@ class Layer_Norm2Cost(ILayer):
         self.y = T.mean( (self.x - self.label) ** 2 )
         self.active = theano.function([self.x, self.label], self.y)
 
-    def make_updates(self, updates, cost):
+    def make_updates(self, updates, cost, learning_config):
         ''' no updates '''
         pass
 
-class Embeddings:
-    def __init__(self, input_count, config):
-        self.__inputs = []
-        for i in range(input_count):
-            self.__inputs.append( T.fmatrix() )
-        self.__label = T.fmatrix()
-
-        fc1 = Layer_FullConnect( [self.__inputs[0]] )
-        fc2 = Layer_FullConnect( [self.__inputs[1]] )
-        dot = Layer_Dot( [fc1.y, fc2.y] )
-        self.dot = dot
-        lcost = Layer_Norm2Cost( [dot.y, self.__label] )
-
-        # predict function.
-        self.active = theano.function(self.__inputs, dot.y)
-
-        # training function.
-        updates = []
-        fc1.make_updates(updates, lcost.y)
-        fc2.make_updates(updates, lcost.y)
-        dot.make_updates(updates, lcost.y)
-        self.train = theano.function(self.__inputs + [self.__label],
-                            lcost.y,
-                            updates = updates
-                )
-
-    def predict(self, *args):
-        return self.active(*args)
-
-    def train(self, *args):
-        pass
-
-
 class ConfigNetwork:
     def __init__(self, config_file, network_name):
+        self.learning_config = LearningConfig(0.1)
+        self.learning_config.symbol_learning_rate = T.scalar()
+
         self.__inputs = []
         self.__label = T.fmatrix()
         self.__layers = []
         self.__layers_info = {}
 
         cp = ConfigParser.ConfigParser()
+        self.__config_parser = cp
+        self.__network_name = network_name
         cp.read(config_file)
         
         input_count = int(cp.get(network_name, 'input_count'))
@@ -159,10 +137,17 @@ class ConfigNetwork:
         print >> sys.stderr, 'Get cost = %s' % cost_name
         cost_y = self.__get_layer(cost_name).y
         for layer in self.__layers:
-            layer.make_updates(updates, cost_y)
+            layer.make_updates(updates, cost_y, self.learning_config)
         print >> sys.stderr, 'updates=%d' % len(updates)
+
+        inputs = []
+        for item in self.__inputs:
+            inputs.append(item)
+        inputs.append(self.__label)
+        inputs.append(self.learning_config.symbol_learning_rate)
+
         self.train = theano.function(
-                    self.__inputs + [self.__label], 
+                    inputs,
                     cost_y, 
                     updates=updates)
 
@@ -171,8 +156,10 @@ class ConfigNetwork:
 
     def fit(self, *args):
         # simple N epoch train.
+        param = list(args)
+        param.append( self.learning_config.learning_rate )
         for i in range(1000):
-            final_cost = self.train(*args)
+            final_cost = self.train(*param)
         return final_cost
 
     def __init_layer(self, name):
@@ -199,11 +186,15 @@ class ConfigNetwork:
                 inputs.append(l.y)
 
         if ltype == 'full_connect':
-            layer = Layer_FullConnect(inputs)
+            n_in = int(self.__config_parser.get(self.__network_name, '%s.n_in' % name))
+            n_out = int(self.__config_parser.get(self.__network_name, '%s.n_out' % name))
+            layer = Layer_FullConnect(inputs, n_in, n_out)
         elif ltype == 'dot':
             layer = Layer_Dot(inputs)
         elif ltype == 'norm2':
             layer = Layer_Norm2Cost(inputs)
+        elif ltype == 'sigmoid':
+            layer = Layer_Sigmoid(inputs)
 
         # for random access.
         self.__layers_info[name][2] = layer
