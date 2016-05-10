@@ -6,7 +6,6 @@
 import sys
 import random
 import time
-from abc import ABCMeta, abstractmethod
 
 import numpy
 import theano
@@ -14,19 +13,7 @@ from sklearn import preprocessing
 from theano import tensor as T
 
 
-class ILayer:
-    '''
-    ILayer: layers' interface.
-    '''
-    __metaclass__ = ABCMeta
-
-    @abstractmethod
-    def make_updates(self, updates, cost, learning_rate, use_sgd = True):
-        ''' Making updates to parameters. '''
-        pass
-
-
-class SimpleLayer(ILayer):
+class SimpleLayer:
     '''
     SimpleLayer
     members:
@@ -80,7 +67,7 @@ class SimpleLayer(ILayer):
             updates.append( (E_gw, 0.7 * E_gw + 0.3 * gy_w) )
             updates.append( (E_gb, 0.7 * E_gb + 0.3 * gy_b) )
 
-class EmbeddingLayer(ILayer):
+class EmbeddingLayer:
     '''
     EmbeddingLayer:
         dot(id_a * embeddings_a, id_b * embeddings_b)
@@ -145,7 +132,7 @@ class EmbeddingLayer(ILayer):
 
 
 class SimpleNetwork:
-    def __init__(self, n_in, n_out, hidden_layers_width, batch_size=512, learning_rate=0.1, output_01=False):
+    def __init__(self, n_in, n_out, hidden_layers_width, learning_rate=0.1, output_01=False):
         self.__learning_rate = learning_rate
         self.__output_01 = output_01
 
@@ -246,7 +233,6 @@ class SimpleNetwork:
                 if last_loss - loss < 1e-5:
                     print >> sys.stderr, 'Early stop'
                     break
-
                 '''
                 if self.__learning_rate>=1e-3 and last_loss - loss < 1e-3:
                     self.__learning_rate = self.__learning_rate * 0.5
@@ -266,7 +252,7 @@ class EmbeddingNetwork:
     Input type:
         Xs = [X[0], X[1], ...]
     '''
-    def __init__(self, n_in_list, embedding_size, batch_size=512, learning_rate=0.1, output_01=False):
+    def __init__(self, n_in_list, embedding_size, learning_rate=0.1, output_01=False):
         self.__learning_rate = learning_rate
         self.__output_01 = output_01
 
