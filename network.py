@@ -27,12 +27,19 @@ class ILayer:
     __metaclass__ = ABCMeta
 
     @abstractmethod
+    def __init__(self, inputs, config_reader):
+        pass
+
+    @abstractmethod
     def make_updates(self, updates, cost, learning_config):
         ''' Making updates to parameters. '''
         pass
 
 class Layer_FullConnect(ILayer):
-    def __init__(self, inputs, n_in, n_out):
+    def __init__(self, inputs, config_reader=None):
+        n_in = int( config_reader('n_in') )
+        n_out = int( config_reader('n_out') )
+
         self.x = inputs[0]
 
         self.w = theano.shared(value=(numpy.random.rand(n_in, n_out)-0.5), borrow=True)
@@ -52,7 +59,7 @@ class Layer_FullConnect(ILayer):
         updates.append( (self.b, self.b - gy_b * symbol_learning_rate) )
 
 class Layer_Dot(ILayer):
-    def __init__(self, inputs):
+    def __init__(self, inputs, config_reader=None):
         self.x1 = inputs[0]
         self.x2 = inputs[1]
         self.y = T.batched_dot(self.x1, self.x2)
@@ -63,7 +70,7 @@ class Layer_Dot(ILayer):
         pass
 
 class Layer_Sigmoid(ILayer):
-    def __init__(self, inputs):
+    def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         # calc sigmoid for each value in matrix.
         self.y = T.nnet.sigmoid(x)
@@ -74,7 +81,7 @@ class Layer_Sigmoid(ILayer):
         pass
 
 class Layer_Tanh(ILayer):
-    def __init__(self, inputs):
+    def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         # calc tanh for each value in matrix.
         self.y = T.tanh(x)
@@ -85,7 +92,7 @@ class Layer_Tanh(ILayer):
         pass
 
 class Layer_Norm2Cost(ILayer):
-    def __init__(self, inputs):
+    def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         self.label = inputs[1]
         self.y = T.mean( (self.x - self.label) ** 2 )
@@ -185,16 +192,15 @@ class ConfigNetwork:
                 l = self.__init_layer(sub_name)
                 inputs.append(l.y)
 
+        config_reader = self.__layer_config_reader(name)
         if ltype == 'full_connect':
-            n_in = int(self.__config_parser.get(self.__network_name, '%s.n_in' % name))
-            n_out = int(self.__config_parser.get(self.__network_name, '%s.n_out' % name))
-            layer = Layer_FullConnect(inputs, n_in, n_out)
+            layer = Layer_FullConnect(inputs, config_reader)
         elif ltype == 'dot':
-            layer = Layer_Dot(inputs)
+            layer = Layer_Dot(inputs, config_reader)
         elif ltype == 'norm2':
-            layer = Layer_Norm2Cost(inputs)
+            layer = Layer_Norm2Cost(inputs, config_reader)
         elif ltype == 'sigmoid':
-            layer = Layer_Sigmoid(inputs)
+            layer = Layer_Sigmoid(inputs, config_reader)
 
         # for random access.
         self.__layers_info[name][2] = layer
@@ -205,6 +211,9 @@ class ConfigNetwork:
     def __get_layer(self, name):
         ltype, inames, layer = self.__layers_info.get(name, ['', [], None])
         return layer
+
+    def __layer_config_reader(self, layer_name):
+        return lambda opt: self.__config_parser.get(self.__network_name, ('%s.'%layer_name) + opt)
 
 if __name__=='__main__':
     pass
