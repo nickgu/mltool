@@ -63,7 +63,6 @@ class DataReader(object):
         self.__target_column = -1
         self.__ignore_first_row = False
 
-
         # TODO: this is not work for iv-sparse format.
         self.__ignore_columns = set()
 
@@ -80,6 +79,7 @@ class DataReader(object):
 
         self.__X = []
         self.__Y = []
+        self.__info = []
 
     def config(self, config_name):
         if '#' not in config_name:
@@ -90,6 +90,8 @@ class DataReader(object):
         config.read(config_file)
 
         self.__seperator = config.get(section, 'seperator', default=',')
+        if self.__seperator == 'tab':
+            self.__seperator = '\t'
         self.__expect_column_count = int( config.get(section, 'fix_columns', default='-1') )
         self.__target_column = int( config.get(section, 'target_column', default='0') ) - 1
         self.__ignore_first_row = int( config.get(section, 'ignore_first_row', default='0') )
@@ -121,6 +123,7 @@ class DataReader(object):
     def read(self, filename):
         self.__X = []
         self.__Y = []
+        self.__info = []
         first_row = True
 
         fd = file(filename)
@@ -149,12 +152,14 @@ class DataReader(object):
             # get x dict.
             id_value = []
             v_size = 0
+            ignored_info = []
             for rid, value in enumerate(row):
                 # continue if target columns.
                 if rid == self.__target_column:
                     continue
                 # continue if filter columns.
                 if rid in self.__ignore_columns:
+                    ignored_info.append(value)
                     continue
 
                 # dense and id-value-sparse
@@ -189,6 +194,8 @@ class DataReader(object):
             y = row[self.__target_column]
             self.__Y.append(y)
 
+            self.__info.append( self.__seperator.join(ignored_info) )
+
         progress.end_progress()
         
         # resize for each X.
@@ -220,8 +227,12 @@ class DataReader(object):
         return self.__X
 
     @property
-    def target(self):
+    def label(self):
         return self.__Y
+
+    @property
+    def info(self):
+        return self.__info
 
     def text_format(self, v):
         s = []

@@ -20,27 +20,31 @@ if __name__=='__main__':
     arg.bool_opt('auc', 'a', 'output auc score of features in training data.')
     opt = arg.init_arg()
 
-    reader = ml_reader.DataReader()
+    train_reader = ml_reader.DataReader()
     if opt.reader_config:
-        reader.config(opt.reader_config)
-    reader.read(opt.filename)
+        train_reader.config(opt.reader_config)
+    train_reader.read(opt.filename)
 
-    train_X = reader.data
-    train_Y = reader.target
+    train_X = train_reader.data
+    train_Y = train_reader.label
     test_X = None
     test_Y = None
 
+    test_reader = None
     if opt.test:
-        reader.read(opt.test)
-        test_X = reader.data
-        test_Y = reader.target
+        test_reader = ml_reader.DataReader()
+        if opt.reader_config:
+            test_reader.config(opt.reader_config)
+        test_reader.read(opt.test)
+        test_X = test_reader.data
+        test_Y = test_reader.label
     else:
         train_X, test_X, train_Y, test_Y = cross_validation.train_test_split(
                 train_X, train_Y, test_size=0.3, random_state=0)
 
     if opt.auc:
         print >> sys.stderr, 'Calculate AUC score'
-        reader.auc(train_X, train_Y, file('auc.txt', 'w'))
+        train_reader.auc(train_X, train_Y, file('auc.txt', 'w'))
    
     from sklearn import svm
     from sklearn import linear_model
@@ -59,33 +63,42 @@ if __name__=='__main__':
         #('best_gbdt', ensemble.GradientBoostingClassifier(n_estimators=300, learning_rate=0.05, max_depth=8, random_state=0) ),
         #('ada', ensemble.AdaBoostClassifier(n_estimators=100) ),
         #('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
-        #('svm', svm.SVC() ),
-        ('simp_nn', SimpleNetwork(len(train_X[0]), 1, [256, 256, 128], output_01=True)),
+        ('svm', svm.SVC() ),
+        #('simp_nn', SimpleNetwork(len(train_X[0]), 1, [256, 256, 128], output_01=True)),
         #('simp_nn', SimpleNetwork( len(train_X[0]), 1, [12, 12], output_01=True)),
         #('simp_nn_lr', SimpleNetwork(len(train_X[0]), [], output_01=True)),
         ]
 
-    def report(pred, target, X, reader, error_writer, out_stream):
+    def report(pred, label, X, reader, error_writer, out_stream):
 
-        if len(pred.shape) > len(target.shape):
+        if len(pred.shape) > len(label.shape):
             # try to flatten.
-            print >> sys.stderr, 'Force flatten! [%s] => [%s]' % (pred.shape, target.shape)
-            pred.shape = target.shape
+            print >> sys.stderr, 'Force flatten! [%s] => [%s]' % (pred.shape, label.shape)
+            pred.shape = label.shape
 
-        true_negative = len(filter(lambda x:x==0, pred + target))
-        true_positive = len(filter(lambda x:x==2, pred + target))
-        false_positive = len(filter(lambda x:x==1, pred - target))
-        false_negative = len(filter(lambda x:x==-1, pred - target))
+        true_negative = len(filter(lambda x:x==0, pred + label))
+        true_positive = len(filter(lambda x:x==2, pred + label))
+        false_positive = len(filter(lambda x:x==1, pred - label))
+        false_negative = len(filter(lambda x:x==-1, pred - label))
 
         for i in range(len(pred)):
-            if pred[i] != target[i]:
-                print >> error_writer, '%d\tP=%.1f\tT=%.1f\t%s' % (
-                        i, pred[i], target[i], reader.text_format(X[i]))
+            if pred[i] != label[i]:
+                if reader is None:
+                    print >> error_writer, '%d\tP=%.1f\tT=%.1f\t%s' % (
+                            i, pred[i], label[i], reader.text_format(X[i]))
+                else:
+                    print >> error_writer, '%d\tP=%.1f\tT=%.1f\t%s\t%s' % (
+                            i, pred[i], label[i], reader.info[i], reader.text_format(X[i]))
 
-        diff_count = len(filter(lambda x:x!=0, pred - target))
-        precision = (len(target) - diff_count) * 100. / len(target)
+        diff_count = len(filter(lambda x:x!=0, pred - label))
+        accuracy = (len(label) - diff_count) * 100. / len(label)
 
-        print >> out_stream, 'Accuracy : ### %.2f%% (%d/%d) ###' % (precision, len(target)-diff_count, len(target))
+        print >> out_stream, 'Accuracy : ### %.2f%% (%d/%d) ###' % (accuracy, len(label)-diff_count, len(label))
+        print >> out_stream, '     P: %.3f%%   R: %.3f%%' % ( 
+                                100. * true_positive / (true_positive + false_positive),
+                                100. * true_positive / (true_positive + false_negative)
+                                )
+
         print >> out_stream, ' Positive: true:%d false:%d' % (true_positive, false_positive)
         print >> out_stream, ' Negative: true:%d false:%d' % (true_negative, false_negative)
 
@@ -99,12 +112,12 @@ if __name__=='__main__':
         # test for best performance(ignore overfitting.).
         pred = model.predict(train_X)
         print >> sys.stderr, 'Predict [Training-set] over.'
-        report(pred, train_Y, train_X, reader, file('error_of_train.txt', 'w'), sys.stderr)
+        report(pred, train_Y, train_X, train_reader, file('error_of_train.txt', 'w'), sys.stderr)
 
         # TEST: test-set.
         pred = model.predict(test_X)
         print >> sys.stderr, 'Predict [Test-set] over.'
-        report(pred, test_Y, test_X, reader, file('error_of_test.txt', 'w'), sys.stderr)
+        report(pred, test_Y, test_X, test_reader, file('error_of_test.txt', 'w'), sys.stderr)
 
 
     
