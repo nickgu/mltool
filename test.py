@@ -12,13 +12,18 @@ def test_Network():
 
     A = R.data[ : , :5]
     B = R.data[ : ,5: ]
-    Y = R.target
+    Y = R.label
     Y.shape = (1,25)
 
     N = network.ConfigNetwork('conf/net.conf', 'embeddings')
-    for i in range(20):
+    for i in range(200):
         cost = N.fit(A, B, Y)
         print cost
 
 if __name__=='__main__':
     test_Network()
+
+
+
+
+
