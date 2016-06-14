@@ -64,7 +64,6 @@ if __name__=='__main__':
     print 'over'
     '''
 
-
     # complex network.
 
     # input - reshape 1d->4d

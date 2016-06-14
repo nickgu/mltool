@@ -19,6 +19,9 @@ from theano import tensor as T
 
 import ConfigParser
 
+def weight_variable(shape):
+    initial = tf.truncated_normal(shape, stddev=0.1)
+    return tf.Variable(initial)
 
 class LearningConfig:
     def __init__(self, learning_rate=0.1):
@@ -33,11 +36,9 @@ class ILayer:
 
     @abstractmethod
     def __init__(self, inputs, config_reader):
-        pass
-
-    @abstractmethod
-    def make_updates(self, updates, cost, learning_config):
-        ''' Making updates to parameters. '''
+        '''
+            need to initialize self.y : output symbol.
+        '''
         pass
 
 class Layer_FullConnect(ILayer):
@@ -46,9 +47,8 @@ class Layer_FullConnect(ILayer):
         n_out = int( config_reader('n_out') )
 
         self.x = inputs[0]
-
-        self.w = tf.Variable(tf.zeros([n_in, n_out]))
-        self.b = tf.Variable(tf.zeros([n_out]))
+        self.w = weight_variable([n_in, n_out])
+        self.b = weight_variable([n_out])
 
         # active function.
         self.y = tf.matmul(self.x, self.w) + self.b
@@ -60,7 +60,8 @@ class Layer_Dot(ILayer):
 
         # active function.
         # x1 dot x2.
-        self.y = self.x1 * self.x2
+        pack = tf.pack([self.x1, self.x2])
+        self.y = tf.reduce_sum( tf.reduce_prod(pack, [0]), [1], keep_dims=True )
 
 class Layer_Sigmoid(ILayer):
     def __init__(self, inputs, config_reader=None):
@@ -83,10 +84,10 @@ class Layer_Norm2Cost(ILayer):
 class ConfigNetwork:
     def __init__(self, config_file, network_name):
         self.learning_config = LearningConfig(0.1)
-        self.learning_config.symbol_learning_rate = T.scalar()
+        #self.learning_config.symbol_learning_rate = T.scalar()
 
         self.__inputs = []
-        self.__label = tf.placeholder(tf.float32, shape=[None, 10])
+        self.__label = tf.placeholder(tf.float32, shape=[None, 1])
         self.__layers = []
         self.__layers_info = {}
 
@@ -94,11 +95,11 @@ class ConfigNetwork:
         self.__config_parser = cp
         self.__network_name = network_name
         cp.read(config_file)
-        
+
         input_count = int(cp.get(network_name, 'input_count'))
         print >> sys.stderr, 'input_count = %d' % input_count
         for i in range(input_count):
-            self.__inputs.append( T.fmatrix() )
+            self.__inputs.append( tf.placeholder(tf.float32, shape=[None, None]) )
 
         layer_names = cp.get(network_name, 'layers').split(',')
         active_name = cp.get(network_name, 'active').strip()
@@ -114,37 +115,42 @@ class ConfigNetwork:
         for name in layer_names:
             self.__init_layer(name)
 
-        # make active function.
-        self.active = theano.function(self.__inputs, self.__get_layer(active_name).y)
-        
-        # make training function.
-        updates = []
-        print >> sys.stderr, 'Get cost = %s' % cost_name
-        cost_y = self.__get_layer(cost_name).y
-        for layer in self.__layers:
-            layer.make_updates(updates, cost_y, self.learning_config)
-        print >> sys.stderr, 'updates=%d' % len(updates)
+        # make network-active function.
+        self.active = self.__get_layer(active_name).y
+        # cost function.
+        self.cost = self.__get_layer(cost_name).y
+        # training function.
+        self.train = tf.train.AdamOptimizer(1e-3).minimize(self.cost)
 
-        inputs = []
-        for item in self.__inputs:
-            inputs.append(item)
-        inputs.append(self.__label)
-        inputs.append(self.learning_config.symbol_learning_rate)
-
-        self.train = theano.function(
-                    inputs,
-                    cost_y, 
-                    updates=updates)
+        self.session = tf.Session()
+        self.session.run( tf.initialize_all_variables() )
 
     def predict(self, *args):
-        return self.active(*args)
+        # simple N epoch train.
+        feed_dict = {}
+        for idx, item in enumerate(args):
+            feed_dict[ self.__inputs[idx] ] = item
+
+        ret = self.active.eval(feed_dict=feed_dict, session=self.session)
+        return ret
 
     def fit(self, *args):
         # simple N epoch train.
-        param = list(args)
-        param.append( self.learning_config.learning_rate )
-        for i in range(1000):
-            final_cost = self.train(*param)
+        feed_dict = {}
+
+        # last one is label.
+        for idx, item in enumerate(args):
+            if idx == len(args)-1:
+                feed_dict[ self.__label ] = item
+            else:
+                feed_dict[ self.__inputs[idx] ] = item
+
+        print self.cost.eval(feed_dict=feed_dict, session=self.session)
+            
+        self.train.run(session=self.session,
+                feed_dict=feed_dict)
+
+        final_cost = self.cost.eval(feed_dict=feed_dict, session=self.session)
         return final_cost
 
     def __init_layer(self, name):

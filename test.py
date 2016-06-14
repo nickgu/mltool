@@ -3,7 +3,7 @@
 # gusimiu@baidu.com
 # 
 
-import network
+import network_tensorflow
 from ml_reader import DataReader
 
 def test_Network():
@@ -13,10 +13,10 @@ def test_Network():
     A = R.data[ : , :5]
     B = R.data[ : ,5: ]
     Y = R.label
-    Y.shape = (1,25)
+    Y.shape = (25, 1)
 
-    N = network.ConfigNetwork('conf/net.conf', 'embeddings')
-    for i in range(200):
+    N = network_tensorflow.ConfigNetwork('conf/net.conf', 'embeddings')
+    for i in range(500):
         cost = N.fit(A, B, Y)
         print cost
 
