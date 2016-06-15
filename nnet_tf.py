@@ -112,7 +112,8 @@ class Layer_Conv2D(ILayer):
                         self.x, 
                         self.W, 
                         strides=[1, 1, 1, 1], 
-                        padding='SAME') 
+                        padding='SAME'
+                    ) 
                     + self.b 
                 )
 
@@ -120,6 +121,7 @@ class Layer_PoolingMax(ILayer):
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         self.pooling_size = int( config_reader('size') )
+        print 'PoolingSize=%d' % self.pooling_size
         self.y = tf.nn.max_pool(self.x, 
                     ksize=[1, self.pooling_size, self.pooling_size, 1],
                     strides=[1, self.pooling_size, self.pooling_size, 1], 
@@ -138,7 +140,6 @@ class Layer_Softmax(ILayer):
         self.y = tf.nn.softmax(self.x)
 
 class ConfigNetwork:
-
     def __init__(self, config_file, network_name, output_01=False):
         self.__LayerCreator__ = {
                 'full_connect'  : Layer_FullConnect,
@@ -212,7 +213,7 @@ class ConfigNetwork:
 
     def fit(self, X, Y):
         # simple train.
-        for it in range(100):
+        for it in range(300):
             idx_list = []
             for i in range(50):
                 idx_list.append( numpy.random.choice(range(len(X))) )

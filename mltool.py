@@ -4,10 +4,12 @@
 # 
 
 import sys
+import copy
 
 import numpy
 import sklearn
 from sklearn import cross_validation
+
 
 import pydev
 import mlreader
@@ -32,9 +34,11 @@ if __name__=='__main__':
 
     test_reader = None
     if opt.test:
-        test_reader = mlreader.DataReader()
-        if opt.reader_config:
-            test_reader.config(opt.reader_config)
+        # copy the config from train_reader.
+        # make two reader the same config.
+        test_reader = copy.copy( train_reader )
+        test_reader.clear_data()
+
         test_reader.read(opt.test)
         test_X = test_reader.data
         test_Y = test_reader.label
@@ -69,8 +73,8 @@ if __name__=='__main__':
         #('simp_nn', SimpleNetwork( len(train_X[0]), 1, [12, 12], output_01=True)),
         #('simp_nn_lr', SimpleNetwork(len(train_X[0]), [], output_01=True)),
         #('fc3_nnet', nnet_tf.ConfigNetwork('conf/net.conf', 'fc3_net', output_01=True)),
-        ('mnist_fc', nnet_tf.ConfigNetwork('conf/net.conf', 'mnist_fc', output_01=True)),
-        #('mnist_conv2d', nnet_tf.ConfigNetwork('conf/net.conf', 'mnist_conv2d')),
+        #('mnist_fc', nnet_tf.ConfigNetwork('conf/net.conf', 'mnist_fc', output_01=True)),
+        ('mnist_conv2d', nnet_tf.ConfigNetwork('conf/net.conf', 'mnist_conv2d', output_01=True)),
         ]
 
     def report(pred, label, X, reader, error_writer, out_stream):
@@ -80,7 +84,7 @@ if __name__=='__main__':
             print >> sys.stderr, 'Force flatten! [%s] => [%s]' % (pred.shape, label.shape)
             pred.shape = label.shape
 
-        if len(label.shape) == 1 or len(label.shape[1])==1:
+        if isinstance(label.shape, int) or len(label.shape) == 1 or label.shape[1]==1:
             true_negative = len(filter(lambda x:x==0, pred + label))
             true_positive = len(filter(lambda x:x==2, pred + label))
             false_positive = len(filter(lambda x:x==1, pred - label))

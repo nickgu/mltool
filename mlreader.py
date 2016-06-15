@@ -81,6 +81,14 @@ class DataReader(object):
         self.__Y = []
         self.__info = []
 
+    def clear_data(self):
+        ''' clear data for next reading.
+        '''
+        self.__X = []
+        self.__Y = []
+        self.__info = []
+        self.__report_config()
+
     def config(self, config_name):
         if '#' not in config_name:
             raise Exception('bad config format: [ config#secion ] is needed.')
@@ -113,6 +121,9 @@ class DataReader(object):
             self.__target_column = self.__expect_column_count - 1
 
         print >> sys.stderr, 'Load config over'
+        self.__report_config()
+
+    def __report_config(self):
         print >> sys.stderr, 'seperator : [%s]' % self.__seperator
         print >> sys.stderr, 'columns : %d (-1 : indicates from first useable row)' % self.__expect_column_count
         print >> sys.stderr, 'target  : %d (0 based, -1 indicates last column)' % self.__target_column
