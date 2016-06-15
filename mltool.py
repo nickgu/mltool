@@ -80,39 +80,37 @@ if __name__=='__main__':
             print >> sys.stderr, 'Force flatten! [%s] => [%s]' % (pred.shape, label.shape)
             pred.shape = label.shape
 
-        print label[:10]
-        print pred[:10]
-        same_count = 0
-        for p, l in zip(pred, label):
-            if (l-p).dot(l-p)<1e-4:
-                same_count += 1
-        print same_count, len(label)
+        if len(label.shape) == 1 or len(label.shape[1])==1:
+            true_negative = len(filter(lambda x:x==0, pred + label))
+            true_positive = len(filter(lambda x:x==2, pred + label))
+            false_positive = len(filter(lambda x:x==1, pred - label))
+            false_negative = len(filter(lambda x:x==-1, pred - label))
 
-        true_negative = len(filter(lambda x:x==0, pred + label))
-        true_positive = len(filter(lambda x:x==2, pred + label))
-        false_positive = len(filter(lambda x:x==1, pred - label))
-        false_negative = len(filter(lambda x:x==-1, pred - label))
+            for i in range(len(pred)):
+                if pred[i] != label[i]:
+                    if reader is None:
+                        print >> error_writer, '%d\tP=%.1f\tT=%.1f\t%s' % (
+                                i, pred[i], label[i], X[i])
+                    else:
+                        print >> error_writer, '%d\tP=%.1f\tT=%.1f\t%s\t%s' % (
+                                i, pred[i], label[i], reader.info[i], reader.text_format(X[i]))
 
-        for i in range(len(pred)):
-            if pred[i] != label[i]:
-                if reader is None:
-                    print >> error_writer, '%d\tP=%.1f\tT=%.1f\t%s' % (
-                            i, pred[i], label[i], X[i])
-                else:
-                    print >> error_writer, '%d\tP=%.1f\tT=%.1f\t%s\t%s' % (
-                            i, pred[i], label[i], reader.info[i], reader.text_format(X[i]))
+            diff_count = len(filter(lambda x:x!=0, pred - label))
+            accuracy = (len(label) - diff_count) * 100. / len(label)
 
-        diff_count = len(filter(lambda x:x!=0, pred - label))
-        accuracy = (len(label) - diff_count) * 100. / len(label)
+            print >> out_stream, 'Accuracy : ### %.2f%% (%d/%d) ###' % (accuracy, len(label)-diff_count, len(label))
+            print >> out_stream, '     P: %.3f%%   R: %.3f%%' % ( 
+                                    100. * true_positive / (true_positive + false_positive),
+                                    100. * true_positive / (true_positive + false_negative)
+                                    )
 
-        print >> out_stream, 'Accuracy : ### %.2f%% (%d/%d) ###' % (accuracy, len(label)-diff_count, len(label))
-        print >> out_stream, '     P: %.3f%%   R: %.3f%%' % ( 
-                                100. * true_positive / (true_positive + false_positive),
-                                100. * true_positive / (true_positive + false_negative)
-                                )
+            print >> out_stream, ' Positive: true:%d false:%d' % (true_positive, false_positive)
+            print >> out_stream, ' Negative: true:%d false:%d' % (true_negative, false_negative)
 
-        print >> out_stream, ' Positive: true:%d false:%d' % (true_positive, false_positive)
-        print >> out_stream, ' Negative: true:%d false:%d' % (true_negative, false_negative)
+        else:
+            same_count = len(filter(lambda x:(x[0]-x[1]).dot(x[0]-x[1])<1e-4, zip(pred, label)))
+            accuracy = same_count * 100. / len(label)
+            print >> out_stream, 'Accuracy : ### %.2f%% (%d/%d) ###' % (accuracy, same_count, len(label))
 
     for name, model in models:
         print >> sys.stderr, '====> model [%s] <====' % name
