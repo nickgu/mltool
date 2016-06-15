@@ -74,7 +74,8 @@ if __name__=='__main__':
         #('simp_nn_lr', SimpleNetwork(len(train_X[0]), [], output_01=True)),
         #('fc3_nnet', nnet_tf.ConfigNetwork('conf/net.conf', 'fc3_net', output_01=True)),
         #('mnist_fc', nnet_tf.ConfigNetwork('conf/net.conf', 'mnist_fc', output_01=True)),
-        ('mnist_conv2d', nnet_tf.ConfigNetwork('conf/net.conf', 'mnist_conv2d', output_01=True)),
+        #('mnist_conv2d', nnet_tf.ConfigNetwork('conf/net.conf', 'mnist_conv2d', output_01=True)),
+        ('mnist_conv2d_big', nnet_tf.ConfigNetwork('conf/net.conf', 'mnist_conv2d_big', output_01=True)),
         ]
 
     def report(pred, label, X, reader, error_writer, out_stream):

@@ -213,7 +213,7 @@ class ConfigNetwork:
 
     def fit(self, X, Y):
         # simple train.
-        for it in range(300):
+        for it in range(1000):
             idx_list = []
             for i in range(50):
                 idx_list.append( numpy.random.choice(range(len(X))) )
