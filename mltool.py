@@ -10,7 +10,7 @@ import sklearn
 from sklearn import cross_validation
 
 import pydev
-import ml_reader
+import mlreader
 
 if __name__=='__main__':
     arg = pydev.Arg('A simple tool for machine learning based ont scikit-learn')
@@ -20,7 +20,7 @@ if __name__=='__main__':
     arg.bool_opt('auc', 'a', 'output auc score of features in training data.')
     opt = arg.init_arg()
 
-    train_reader = ml_reader.DataReader()
+    train_reader = mlreader.DataReader()
     if opt.reader_config:
         train_reader.config(opt.reader_config)
     train_reader.read(opt.filename)
@@ -32,7 +32,7 @@ if __name__=='__main__':
 
     test_reader = None
     if opt.test:
-        test_reader = ml_reader.DataReader()
+        test_reader = mlreader.DataReader()
         if opt.reader_config:
             test_reader.config(opt.reader_config)
         test_reader.read(opt.test)

@@ -4,7 +4,7 @@
 # 
 
 import nnet_tf
-from ml_reader import DataReader
+from mlreader import DataReader
 
 def test_Network():
     R = DataReader()
