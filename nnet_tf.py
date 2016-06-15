@@ -9,6 +9,7 @@ from abc import ABCMeta, abstractmethod
 
 
 import tensorflow as tf
+import numpy
 
 '''
 import numpy
@@ -67,7 +68,7 @@ class Layer_Sigmoid(ILayer):
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         # calc sigmoid for each value in matrix.
-        self.y = tf.sigmoid(x)
+        self.y = tf.sigmoid(self.x)
 
 class Layer_Tanh(ILayer):
     def __init__(self, inputs, config_reader=None):
@@ -82,9 +83,11 @@ class Layer_Norm2Cost(ILayer):
         self.y = tf.reduce_mean( (self.x - self.label) ** 2 )
 
 class ConfigNetwork:
-    def __init__(self, config_file, network_name):
+    def __init__(self, config_file, network_name, output_01=False):
         self.learning_config = LearningConfig(0.1)
         #self.learning_config.symbol_learning_rate = T.scalar()
+
+        self.__output_01 = output_01
 
         self.__inputs = []
         self.__label = tf.placeholder(tf.float32, shape=[None, 1])
@@ -132,20 +135,32 @@ class ConfigNetwork:
             feed_dict[ self.__inputs[idx] ] = item
 
         ret = self.active.eval(feed_dict=feed_dict, session=self.session)
+        if self.__output_01:
+            for x in numpy.nditer(ret, op_flags=['readwrite']):
+                x[...] = 1. if x[...]>=.5 else 0.
         return ret
 
-    def fit(self, *args):
+    def fit(self, X, Y):
+        # simple train.
+        for it in range(1500):
+            cost = self.fit_one_batch(X, Y)
+            if it % 100==0:
+                print it, cost
+
+    def fit_one_batch(self, *args):
         # simple N epoch train.
         feed_dict = {}
 
         # last one is label.
         for idx, item in enumerate(args):
             if idx == len(args)-1:
+                if len(item.shape) == 1:
+                    item.shape = (item.shape[0], 1)
                 feed_dict[ self.__label ] = item
             else:
                 feed_dict[ self.__inputs[idx] ] = item
 
-        print self.cost.eval(feed_dict=feed_dict, session=self.session)
+        #print self.cost.eval(feed_dict=feed_dict, session=self.session)
             
         self.train.run(session=self.session,
                 feed_dict=feed_dict)

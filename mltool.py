@@ -53,6 +53,7 @@ if __name__=='__main__':
     from sklearn import tree
     from sklearn import ensemble
     from simple_nn import SimpleNetwork
+    import nnet_tf
 
     models = [
         #('lr', linear_model.LogisticRegression() ),
@@ -67,6 +68,7 @@ if __name__=='__main__':
         #('simp_nn', SimpleNetwork(len(train_X[0]), 1, [256, 256, 128], output_01=True)),
         #('simp_nn', SimpleNetwork( len(train_X[0]), 1, [12, 12], output_01=True)),
         #('simp_nn_lr', SimpleNetwork(len(train_X[0]), [], output_01=True)),
+        #('fc3_nnet', nnet_tf.ConfigNetwork('conf/net.conf', 'fc3_net', output_01=True)),
         ]
 
     def report(pred, label, X, reader, error_writer, out_stream):
@@ -85,7 +87,7 @@ if __name__=='__main__':
             if pred[i] != label[i]:
                 if reader is None:
                     print >> error_writer, '%d\tP=%.1f\tT=%.1f\t%s' % (
-                            i, pred[i], label[i], reader.text_format(X[i]))
+                            i, pred[i], label[i], X[i])
                 else:
                     print >> error_writer, '%d\tP=%.1f\tT=%.1f\t%s\t%s' % (
                             i, pred[i], label[i], reader.info[i], reader.text_format(X[i]))
