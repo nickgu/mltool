@@ -98,6 +98,7 @@ class DataReader(object):
 
         self.__maxabs_scale = int( config.get(section, 'maxabs_scale', default='0') )
         self.__concrete_target = int( config.get(section, 'concrete_target', default='0') )
+        self.__target_one_hot = int( config.get(section, 'target_one_hot', default='0') )
 
         s = config.get(section, 'concrete_ids', default='')
         if s:
@@ -117,6 +118,7 @@ class DataReader(object):
         print >> sys.stderr, 'target  : %d (0 based, -1 indicates last column)' % self.__target_column
         print >> sys.stderr, 'concrete_ids : %s' % (','.join(map(str, self.__concrete_ids)))
         print >> sys.stderr, 'concrete_target : %d' % (self.__concrete_target)
+        print >> sys.stderr, 'target_one_hot : %d' % (self.__target_one_hot)
         print >> sys.stderr, 'ignore_columns : %s' % (','.join(map(str, self.__ignore_columns)))
         print >> sys.stderr, 'ignore_first_row : %d' % self.__ignore_first_row
 
@@ -206,6 +208,17 @@ class DataReader(object):
             new_x[:x.shape[0]] = x
             self.__X.append( new_x )
 
+        # resize Y if concrete label.
+        if self.__target_one_hot:
+            raw_Y = self.__Y
+            self.__Y = []
+            y_size = self.__target_trans.size()
+            for y in raw_Y:
+                new_y = numpy.ndarray(shape=(y_size,), dtype=numpy.float32)
+                new_y.fill(0)
+                new_y[ int(y) ] = 1.
+                self.__Y.append( new_y )
+
         # transform X to numpy.ndarray
         self.__X = numpy.array(self.__X)
 
@@ -277,6 +290,11 @@ if __name__=='__main__':
         reader = DataReader()
         reader.read(filename)
 
+
+    print 'Data sample:'
+    print reader.data[0]
+    print 'Label sample:'
+    print reader.label[0]
 
 
 

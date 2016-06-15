@@ -26,6 +26,7 @@ def max_pool_2x2(x):
 if __name__=='__main__':
     # load data.
     mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
+    print type(mnist)
 
     # build session.
     sess = tf.InteractiveSession()
@@ -92,24 +93,35 @@ if __name__=='__main__':
 
     # dropout
     keep_prob = tf.placeholder(tf.float32)
+    '''
     h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
+    '''
 
     # fc2 - readout.
     W_fc2 = weight_variable([1024, 10])
     b_fc2 = bias_variable([10])
 
-    y_conv=tf.nn.softmax(tf.matmul(h_fc1_drop, W_fc2) + b_fc2)
+    # ignore dropout.
+    y_conv=tf.nn.softmax(tf.matmul(h_fc1, W_fc2) + b_fc2)
+    #y_conv=tf.nn.softmax(tf.matmul(h_fc1_drop, W_fc2) + b_fc2)
 
     cross_entropy = tf.reduce_mean(-tf.reduce_sum(y_ * tf.log(y_conv), reduction_indices=[1]))
     train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
+
+    cost_function = tf.reduce_mean( (y_ - y_conv) ** 2 )
+    train_step = tf.train.AdamOptimizer(1e-4).minimize(cost_function)
+
     correct_prediction = tf.equal(tf.argmax(y_conv,1), tf.argmax(y_,1))
     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
     sess.run(tf.initialize_all_variables())
     print 'mult-layer'
-    for i in range(20000):
+    for i in range(2000):
         batch = mnist.train.next_batch(50)
         if i % 100 == 0:
-            print 'step : %d' % i
+            cost = cost_function.eval(feed_dict={
+                    x:batch[0], y_: batch[1], keep_prob: 1.0})
+            print 'step=%d cost=%.3f' % (i, cost)
+
             '''
             train_accuracy = accuracy.eval(feed_dict={
                     x:batch[0], y_: batch[1], keep_prob: 1.0})

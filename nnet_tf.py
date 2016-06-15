@@ -10,6 +10,7 @@ from abc import ABCMeta, abstractmethod
 
 import tensorflow as tf
 import numpy
+import numpy.random
 
 '''
 import numpy
@@ -22,6 +23,10 @@ import ConfigParser
 
 def weight_variable(shape):
     initial = tf.truncated_normal(shape, stddev=0.1)
+    return tf.Variable(initial)
+
+def bias_variable(shape):
+    initial = tf.constant(0.1, shape=shape)
     return tf.Variable(initial)
 
 class LearningConfig:
@@ -49,15 +54,13 @@ class Layer_FullConnect(ILayer):
 
         self.x = inputs[0]
         self.w = weight_variable([n_in, n_out])
-        self.b = weight_variable([n_out])
+        self.b = bias_variable([n_out])
 
         # active function.
         self.y = tf.matmul(self.x, self.w) + self.b
 
 class Layer_Dot(ILayer):
     def __init__(self, inputs, config_reader=None):
-        self.x1 = inputs[0]
-        self.x2 = inputs[1]
 
         # active function.
         # x1 dot x2.
@@ -74,7 +77,13 @@ class Layer_Tanh(ILayer):
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         # calc tanh for each value in matrix.
-        self.y = tf.tanh(x)
+        self.y = tf.tanh(self.x)
+
+class Layer_Relu(ILayer):
+    def __init__(self, inputs, config_reader=None):
+        self.x = inputs[0]
+        # calc relu for each value in matrix.
+        self.y = tf.nn.relu(self.x)
 
 class Layer_Norm2Cost(ILayer):
     def __init__(self, inputs, config_reader=None):
@@ -82,15 +91,76 @@ class Layer_Norm2Cost(ILayer):
         self.label = inputs[1]
         self.y = tf.reduce_mean( (self.x - self.label) ** 2 )
 
+class Layer_DropOut(ILayer):
+    def __init__(self, inputs, config_reader=None):
+        self.x = inputs[0]
+        prob = float( config_reader('prob') )
+        self.y = tf.nn.dropout(self.x, keep_prob=prob)
+
+class Layer_Conv2D(ILayer):
+    def __init__(self, inputs, config_reader=None):
+        self.x = inputs[0]
+        # x, y, in_chan, out_chan
+        self.shape = map(int, config_reader('shape').split(','))
+        self.W = weight_variable(self.shape)
+        self.b = bias_variable([self.shape[3]])
+        print >> sys.stderr, 'Conv-shape : %s' % (self.shape)
+
+        # out_chan
+        self.y = tf.nn.relu( 
+                    tf.nn.conv2d(
+                        self.x, 
+                        self.W, 
+                        strides=[1, 1, 1, 1], 
+                        padding='SAME') 
+                    + self.b 
+                )
+
+class Layer_PoolingMax(ILayer):
+    def __init__(self, inputs, config_reader=None):
+        self.x = inputs[0]
+        self.pooling_size = int( config_reader('size') )
+        self.y = tf.nn.max_pool(self.x, 
+                    ksize=[1, self.pooling_size, self.pooling_size, 1],
+                    strides=[1, self.pooling_size, self.pooling_size, 1], 
+                    padding='SAME')
+
+class Layer_Reshape(ILayer):
+    def __init__(self, inputs, config_reader=None):
+        self.x = inputs[0]
+        self.shape = map(int, config_reader('shape').split(','))
+        print >> sys.stderr, 'Reshape : %s' % (self.shape)
+        self.y = tf.reshape(self.x, self.shape)
+
+class Layer_Softmax(ILayer):
+    def __init__(self, inputs, config_reader=None):
+        self.x = inputs[0]
+        self.y = tf.nn.softmax(self.x)
+
 class ConfigNetwork:
+
     def __init__(self, config_file, network_name, output_01=False):
+        self.__LayerCreator__ = {
+                'full_connect'  : Layer_FullConnect,
+                'dot'           : Layer_Dot,
+                'norm2'         : Layer_Norm2Cost,
+                'sigmoid'       : Layer_Sigmoid,
+                'softmax'       : Layer_Softmax,
+                'tanh'          : Layer_Tanh,
+                'relu'          : Layer_Relu,
+                'conv2d'        : Layer_Conv2D,
+                'maxpool'       : Layer_PoolingMax,
+                'reshape'       : Layer_Reshape,
+                'dropout'       : Layer_DropOut,
+            }
+
         self.learning_config = LearningConfig(0.1)
         #self.learning_config.symbol_learning_rate = T.scalar()
 
         self.__output_01 = output_01
 
         self.__inputs = []
-        self.__label = tf.placeholder(tf.float32, shape=[None, 1])
+        self.__label = tf.placeholder(tf.float32, shape=[None, None])
         self.__layers = []
         self.__layers_info = {}
 
@@ -142,10 +212,15 @@ class ConfigNetwork:
 
     def fit(self, X, Y):
         # simple train.
-        for it in range(1500):
-            cost = self.fit_one_batch(X, Y)
-            if it % 100==0:
-                print it, cost
+        for it in range(100):
+            idx_list = []
+            for i in range(50):
+                idx_list.append( numpy.random.choice(range(len(X))) )
+            sub_X = numpy.array( map(lambda i:X[i], idx_list) )
+            sub_Y = numpy.array( map(lambda i:Y[i], idx_list) )
+
+            cost = self.fit_one_batch(sub_X, sub_Y)
+            print it, cost
 
     def fit_one_batch(self, *args):
         # simple N epoch train.
@@ -192,14 +267,8 @@ class ConfigNetwork:
                 inputs.append(l.y)
 
         config_reader = self.__layer_config_reader(name)
-        if ltype == 'full_connect':
-            layer = Layer_FullConnect(inputs, config_reader)
-        elif ltype == 'dot':
-            layer = Layer_Dot(inputs, config_reader)
-        elif ltype == 'norm2':
-            layer = Layer_Norm2Cost(inputs, config_reader)
-        elif ltype == 'sigmoid':
-            layer = Layer_Sigmoid(inputs, config_reader)
+        creator = self.__LayerCreator__[ltype]
+        layer = creator(inputs, config_reader)
 
         # for random access.
         self.__layers_info[name][2] = layer

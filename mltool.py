@@ -61,7 +61,7 @@ if __name__=='__main__':
         #('gnb', naive_bayes.GaussianNB() ),
         #('tree', tree.DecisionTreeClassifier() ),
         #('simple_gbdt', ensemble.GradientBoostingClassifier(n_estimators=50, learning_rate=0.1, max_depth=5, random_state=0) ),
-        ('best_gbdt', ensemble.GradientBoostingClassifier(n_estimators=500, learning_rate=0.05, max_depth=6, random_state=0) ),
+        #('best_gbdt', ensemble.GradientBoostingClassifier(n_estimators=500, learning_rate=0.05, max_depth=6, random_state=0) ),
         #('ada', ensemble.AdaBoostClassifier(n_estimators=100) ),
         #('rf', ensemble.RandomForestClassifier(n_estimators=100) ),
         #('svm', svm.SVC() ),
@@ -69,6 +69,8 @@ if __name__=='__main__':
         #('simp_nn', SimpleNetwork( len(train_X[0]), 1, [12, 12], output_01=True)),
         #('simp_nn_lr', SimpleNetwork(len(train_X[0]), [], output_01=True)),
         #('fc3_nnet', nnet_tf.ConfigNetwork('conf/net.conf', 'fc3_net', output_01=True)),
+        ('mnist_fc', nnet_tf.ConfigNetwork('conf/net.conf', 'mnist_fc', output_01=True)),
+        #('mnist_conv2d', nnet_tf.ConfigNetwork('conf/net.conf', 'mnist_conv2d')),
         ]
 
     def report(pred, label, X, reader, error_writer, out_stream):
@@ -77,6 +79,14 @@ if __name__=='__main__':
             # try to flatten.
             print >> sys.stderr, 'Force flatten! [%s] => [%s]' % (pred.shape, label.shape)
             pred.shape = label.shape
+
+        print label[:10]
+        print pred[:10]
+        same_count = 0
+        for p, l in zip(pred, label):
+            if (l-p).dot(l-p)<1e-4:
+                same_count += 1
+        print same_count, len(label)
 
         true_negative = len(filter(lambda x:x==0, pred + label))
         true_positive = len(filter(lambda x:x==2, pred + label))
