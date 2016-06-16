@@ -231,8 +231,25 @@ class ConfigNetwork:
         self.session = tf.Session()
         self.session.run( tf.initialize_all_variables() )
 
+    def predict(self, X):
+        ret = None
+        batch_size = 50
+        for b in range(0, len(X), batch_size):
+            feed_dict = {}
+            feed_dict[ self.__inputs[0] ] = X[b:b+batch_size]
+
+            partial_ret = self.active.eval(feed_dict=feed_dict, session=self.session)
+            if self.__output_01:
+                for x in numpy.nditer(partial_ret, op_flags=['readwrite']):
+                    x[...] = 1. if x[...]>=.5 else 0.
+            if ret is None:
+                ret = partial_ret
+            else:
+                ret = numpy.append(ret, partial_ret, axis=0)
+        return ret
+
+    '''
     def predict(self, *args):
-        # simple N epoch train.
         feed_dict = {}
         for idx, item in enumerate(args):
             feed_dict[ self.__inputs[idx] ] = item
@@ -242,6 +259,7 @@ class ConfigNetwork:
             for x in numpy.nditer(ret, op_flags=['readwrite']):
                 x[...] = 1. if x[...]>=.5 else 0.
         return ret
+    '''
 
     def fit(self, X, Y):
         # simple train.
