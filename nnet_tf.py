@@ -6,8 +6,10 @@
 
 import sys
 from abc import ABCMeta, abstractmethod
+import time
 
 
+import pydev
 import tensorflow as tf
 import numpy
 import numpy.random
@@ -29,10 +31,12 @@ def bias_variable(shape):
     initial = tf.constant(0.1, shape=shape)
     return tf.Variable(initial)
 
+'''
 class LearningConfig:
     def __init__(self, learning_rate=0.1):
         self.learning_rate = learning_rate
         #self.symbol_learning_rate = T.scalar()
+'''
 
 class ILayer:
     '''
@@ -46,6 +50,31 @@ class ILayer:
             need to initialize self.y : output symbol.
         '''
         pass
+
+class Layer_OpFullConnect(ILayer):
+    def __init__(self, inputs, config_reader=None):
+        n_in = int( config_reader('n_in') )
+        n_out = int( config_reader('n_out') )
+        op = config_reader('op')
+
+        Fdict = {
+            'sigmoid'   : tf.sigmoid,
+            'tanh'      : tf.tanh,
+            'softmax'   : tf.nn.softmax,
+            'relu'      : tf.nn.relu
+                }
+        F = Fdict.get(op, None)
+
+        self.x = inputs[0]
+        self.w = weight_variable([n_in, n_out])
+        self.b = bias_variable([n_out])
+
+        # active function.
+        if F is None:
+            self.y = tf.matmul(self.x, self.w) + self.b
+        else:
+            self.y = F( tf.matmul(self.x, self.w) + self.b )
+
 
 class Layer_FullConnect(ILayer):
     def __init__(self, inputs, config_reader=None):
@@ -142,21 +171,19 @@ class Layer_Softmax(ILayer):
 class ConfigNetwork:
     def __init__(self, config_file, network_name, output_01=False):
         self.__LayerCreator__ = {
-                'full_connect'  : Layer_FullConnect,
-                'dot'           : Layer_Dot,
-                'norm2'         : Layer_Norm2Cost,
-                'sigmoid'       : Layer_Sigmoid,
-                'softmax'       : Layer_Softmax,
-                'tanh'          : Layer_Tanh,
-                'relu'          : Layer_Relu,
-                'conv2d'        : Layer_Conv2D,
-                'maxpool'       : Layer_PoolingMax,
-                'reshape'       : Layer_Reshape,
-                'dropout'       : Layer_DropOut,
+                'full_connect'      : Layer_FullConnect,
+                'full_connect_op'   : Layer_OpFullConnect,
+                'dot'               : Layer_Dot,
+                'norm2'             : Layer_Norm2Cost,
+                'sigmoid'           : Layer_Sigmoid,
+                'softmax'           : Layer_Softmax,
+                'tanh'              : Layer_Tanh,
+                'relu'              : Layer_Relu,
+                'conv2d'            : Layer_Conv2D,
+                'maxpool'           : Layer_PoolingMax,
+                'reshape'           : Layer_Reshape,
+                'dropout'           : Layer_DropOut,
             }
-
-        self.learning_config = LearningConfig(0.1)
-        #self.learning_config.symbol_learning_rate = T.scalar()
 
         self.__output_01 = output_01
 
@@ -178,6 +205,11 @@ class ConfigNetwork:
         layer_names = cp.get(network_name, 'layers').split(',')
         active_name = cp.get(network_name, 'active').strip()
         cost_name = cp.get(network_name, 'cost').strip()
+
+        self.__learning_rate = float( pydev.config_default_get(cp, network_name, 'learning_rate', 1e-3) )
+        print >> sys.stderr, 'LearningRate : %.5f' % self.__learning_rate
+        self.__epoch = int( pydev.config_default_get(cp, network_name, 'epoch', 1000) )
+        print >> sys.stderr, 'Epoch : %d' % self.__epoch
    
         for layer_name in layer_names:
             layer_type = cp.get(network_name, '%s.type' % layer_name)
@@ -194,7 +226,7 @@ class ConfigNetwork:
         # cost function.
         self.cost = self.__get_layer(cost_name).y
         # training function.
-        self.train = tf.train.AdamOptimizer(1e-3).minimize(self.cost)
+        self.train = tf.train.AdamOptimizer( self.__learning_rate ).minimize(self.cost)
 
         self.session = tf.Session()
         self.session.run( tf.initialize_all_variables() )
@@ -213,20 +245,24 @@ class ConfigNetwork:
 
     def fit(self, X, Y):
         # simple train.
-        for it in range(1000):
+        tm = time.time()
+        for it in range(self.__epoch):
             idx_list = []
             for i in range(50):
                 idx_list.append( numpy.random.choice(range(len(X))) )
             sub_X = numpy.array( map(lambda i:X[i], idx_list) )
             sub_Y = numpy.array( map(lambda i:Y[i], idx_list) )
 
-            cost = self.fit_one_batch(sub_X, sub_Y)
-            print it, cost
+            self.fit_one_batch(sub_X, sub_Y)
+            if it % 10 == 0:
+                cost = self.calc_cost(sub_X, sub_Y)
+                diff_tm = time.time() - tm
+                print 'iter=%d, cost=%.3f, tm=%.3f' % (it, cost, diff_tm)
+                tm = time.time()
 
-    def fit_one_batch(self, *args):
+    def calc_cost(self, *args):
         # simple N epoch train.
         feed_dict = {}
-
         # last one is label.
         for idx, item in enumerate(args):
             if idx == len(args)-1:
@@ -236,13 +272,23 @@ class ConfigNetwork:
             else:
                 feed_dict[ self.__inputs[idx] ] = item
 
-        #print self.cost.eval(feed_dict=feed_dict, session=self.session)
-            
-        self.train.run(session=self.session,
-                feed_dict=feed_dict)
-
         final_cost = self.cost.eval(feed_dict=feed_dict, session=self.session)
         return final_cost
+
+    def fit_one_batch(self, *args):
+        # simple N epoch train.
+        feed_dict = {}
+        # last one is label.
+        for idx, item in enumerate(args):
+            if idx == len(args)-1:
+                if len(item.shape) == 1:
+                    item.shape = (item.shape[0], 1)
+                feed_dict[ self.__label ] = item
+            else:
+                feed_dict[ self.__inputs[idx] ] = item
+
+        self.train.run(session=self.session,
+                feed_dict=feed_dict)
 
     def __init_layer(self, name):
         print >> sys.stderr, 'Try to init layer [%s]' % name

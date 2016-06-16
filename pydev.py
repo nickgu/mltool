@@ -293,6 +293,11 @@ class TopkHeap(object):
                 return True
         return False
 
+def config_default_get(cp, section, option, default_value=None):
+    if cp.has_option(section, option):
+        return cp.get(section, option)
+    return default_value
+
 class VarConfig:
     def __init__(self):
         self.__config = {}

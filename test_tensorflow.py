@@ -115,7 +115,7 @@ if __name__=='__main__':
     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
     sess.run(tf.initialize_all_variables())
     print 'mult-layer'
-    for i in range(2000):
+    for i in range(600):
         batch = mnist.train.next_batch(50)
         if i % 100 == 0:
             cost = cost_function.eval(feed_dict={
