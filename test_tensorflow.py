@@ -93,17 +93,15 @@ if __name__=='__main__':
 
     # dropout
     keep_prob = tf.placeholder(tf.float32)
-    '''
     h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
-    '''
 
     # fc2 - readout.
     W_fc2 = weight_variable([1024, 10])
     b_fc2 = bias_variable([10])
 
     # ignore dropout.
-    y_conv=tf.nn.softmax(tf.matmul(h_fc1, W_fc2) + b_fc2)
-    #y_conv=tf.nn.softmax(tf.matmul(h_fc1_drop, W_fc2) + b_fc2)
+    #y_conv=tf.nn.softmax(tf.matmul(h_fc1, W_fc2) + b_fc2)
+    y_conv=tf.nn.softmax(tf.matmul(h_fc1_drop, W_fc2) + b_fc2)
 
     cross_entropy = tf.reduce_mean(-tf.reduce_sum(y_ * tf.log(y_conv), reduction_indices=[1]))
     train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
@@ -115,7 +113,7 @@ if __name__=='__main__':
     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
     sess.run(tf.initialize_all_variables())
     print 'mult-layer'
-    for i in range(600):
+    for i in range(2000):
         batch = mnist.train.next_batch(50)
         if i % 100 == 0:
             cost = cost_function.eval(feed_dict={

@@ -52,6 +52,13 @@ class ILayer:
         pass
 
 class Layer_OpFullConnect(ILayer):
+    ''' 
+        Y = Op(W*X + b) 
+        param:
+            n_in    : input_count
+            n_out   : output_count
+            op      : operator: sigmoid|tanh|softmax|relu
+    '''
     def __init__(self, inputs, config_reader=None):
         n_in = int( config_reader('n_in') )
         n_out = int( config_reader('n_out') )
@@ -77,6 +84,12 @@ class Layer_OpFullConnect(ILayer):
 
 
 class Layer_FullConnect(ILayer):
+    ''' 
+        Y = W*X + b 
+        param:
+            n_in    : input_count
+            n_out   : output_count
+    '''
     def __init__(self, inputs, config_reader=None):
         n_in = int( config_reader('n_in') )
         n_out = int( config_reader('n_out') )
@@ -89,6 +102,9 @@ class Layer_FullConnect(ILayer):
         self.y = tf.matmul(self.x, self.w) + self.b
 
 class Layer_Dot(ILayer):
+    '''
+        Y = X1 * X2
+    '''
     def __init__(self, inputs, config_reader=None):
 
         # active function.
@@ -97,36 +113,50 @@ class Layer_Dot(ILayer):
         self.y = tf.reduce_sum( tf.reduce_prod(pack, [0]), [1], keep_dims=True )
 
 class Layer_Sigmoid(ILayer):
+    ''' Y = sigmoid(X) '''
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         # calc sigmoid for each value in matrix.
         self.y = tf.sigmoid(self.x)
 
 class Layer_Tanh(ILayer):
+    ''' Y = tanh(X) '''
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         # calc tanh for each value in matrix.
         self.y = tf.tanh(self.x)
 
 class Layer_Relu(ILayer):
+    ''' Y = relu(X) '''
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         # calc relu for each value in matrix.
         self.y = tf.nn.relu(self.x)
 
 class Layer_Norm2Cost(ILayer):
+    ''' Y = |x1 - x2|_2  ''' 
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         self.label = inputs[1]
         self.y = tf.reduce_mean( (self.x - self.label) ** 2 )
 
 class Layer_DropOut(ILayer):
+    ''' 
+        Y = drop_out(X) 
+        param:
+            prob    : selective ratio.
+    '''
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         prob = float( config_reader('prob') )
         self.y = tf.nn.dropout(self.x, keep_prob=prob)
 
 class Layer_Conv2D(ILayer):
+    ''' 
+        Y = conv2d(X)
+        param:
+            shape = window_x, window_y, in_chan, out_chan
+    '''
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         # x, y, in_chan, out_chan
@@ -147,6 +177,11 @@ class Layer_Conv2D(ILayer):
                 )
 
 class Layer_PoolingMax(ILayer):
+    '''
+        Y = pooling_max(X)
+        param:
+            size    :  window of [size x size]
+    '''
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         self.pooling_size = int( config_reader('size') )
@@ -157,6 +192,11 @@ class Layer_PoolingMax(ILayer):
                     padding='SAME')
 
 class Layer_Reshape(ILayer):
+    '''
+        Y = reshape(X)
+        param:
+            shape : new shape.
+    '''
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         self.shape = map(int, config_reader('shape').split(','))
@@ -164,6 +204,7 @@ class Layer_Reshape(ILayer):
         self.y = tf.reshape(self.x, self.shape)
 
 class Layer_Softmax(ILayer):
+    ''' Y = softmax(X)  '''
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         self.y = tf.nn.softmax(self.x)
