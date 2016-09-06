@@ -228,7 +228,7 @@ class ConfigNetwork:
         # training function.
         self.train = tf.train.AdamOptimizer( self.__learning_rate ).minimize(self.cost)
 
-        self.session = tf.Session()
+        self.session = tf.Session(config=tf.ConfigProto(log_device_placement=True))
         self.session.run( tf.initialize_all_variables() )
 
     def predict(self, X):
@@ -272,10 +272,10 @@ class ConfigNetwork:
             sub_Y = numpy.array( map(lambda i:Y[i], idx_list) )
 
             self.fit_one_batch(sub_X, sub_Y)
-            if it % 10 == 0:
+            if it % 100 == 0:
                 cost = self.calc_cost(sub_X, sub_Y)
                 diff_tm = time.time() - tm
-                print 'iter=%d, cost=%.3f, tm=%.3f' % (it, cost, diff_tm)
+                print >> sys.stderr, 'iter=%d, cost=%.5f, tm=%.3f' % (it, cost, diff_tm)
                 tm = time.time()
 
     def calc_cost(self, *args):
@@ -289,6 +289,11 @@ class ConfigNetwork:
                 feed_dict[ self.__label ] = item
             else:
                 feed_dict[ self.__inputs[idx] ] = item
+
+        # debug cost.
+        y = self.active.eval(feed_dict=feed_dict, session=self.session)
+        #print 'y[0]:' +  str(y[0]) 
+        #print 'label:' + str(feed_dict[ self.__label ][0])
 
         final_cost = self.cost.eval(feed_dict=feed_dict, session=self.session)
         return final_cost
