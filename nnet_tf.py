@@ -23,6 +23,14 @@ from theano import tensor as T
 
 import ConfigParser
 
+def precision_01(label, pred):
+    a = [x.argmax() for x in label]
+    b = [x.argmax() for x in pred]
+    correct_count = len( filter(lambda x:x[0]==x[1], zip(a,b))) 
+    total_count = len(label) 
+    precision = correct_count * 1. / total_count
+    return precision, correct_count, total_count
+
 def weight_variable(shape):
     initial = tf.truncated_normal(shape, stddev=0.1)
     return tf.Variable(initial)
@@ -191,6 +199,45 @@ class Layer_PoolingMax(ILayer):
                     strides=[1, self.pooling_size, self.pooling_size, 1], 
                     padding='SAME')
 
+class Layer_Conv2DPooling(ILayer):
+    ''' 
+        Y = pooling( conv2d(X) )
+        param:
+            shape       : window_x, window_y, in_chan, out_chan
+            pool_type   : [max]
+            pool_size   : window of [size x size] in pooling.
+    '''
+    def __init__(self, inputs, config_reader=None):
+        self.x = inputs[0]
+        # x, y, in_chan, out_chan
+        self.shape = map(int, config_reader('shape').split(','))
+        self.W = weight_variable(self.shape)
+        self.b = bias_variable([self.shape[3]])
+
+        self.pooling_size = int( config_reader('pool_size') )
+        self.pooling_type = config_reader('pool_type')
+        print >> sys.stderr, 'Conv-shape : %s' % (self.shape)
+
+        # out_chan
+        conv_out = tf.nn.relu( 
+                    tf.nn.conv2d(
+                        self.x, 
+                        self.W, 
+                        strides=[1, 1, 1, 1], 
+                        padding='SAME'
+                    ) 
+                    + self.b 
+                )
+
+        print 'PoolingSize=%d' % self.pooling_size
+        if self.pooling_type == 'max':
+            self.y = tf.nn.max_pool(conv_out, 
+                        ksize=[1, self.pooling_size, self.pooling_size, 1],
+                        strides=[1, self.pooling_size, self.pooling_size, 1], 
+                        padding='SAME')
+        else:
+            print >> sys.stderr, 'Bad pooling type: %s' % self.pooling_type
+
 class Layer_Reshape(ILayer):
     '''
         Y = reshape(X)
@@ -222,6 +269,7 @@ class ConfigNetwork:
                 'relu'              : Layer_Relu,
                 'conv2d'            : Layer_Conv2D,
                 'maxpool'           : Layer_PoolingMax,
+                'conv2d_pool'       : Layer_Conv2DPooling,
                 'reshape'           : Layer_Reshape,
                 'dropout'           : Layer_DropOut,
             }
@@ -247,6 +295,7 @@ class ConfigNetwork:
         active_name = cp.get(network_name, 'active').strip()
         cost_name = cp.get(network_name, 'cost').strip()
 
+        self.__batch_size = int( pydev.config_default_get(cp, network_name, 'batch_size', 50) )
         self.__learning_rate = float( pydev.config_default_get(cp, network_name, 'learning_rate', 1e-3) )
         print >> sys.stderr, 'LearningRate : %.5f' % self.__learning_rate
         self.__epoch = int( pydev.config_default_get(cp, network_name, 'epoch', 1000) )
@@ -274,7 +323,7 @@ class ConfigNetwork:
 
     def predict(self, X):
         ret = None
-        batch_size = 50
+        batch_size = self.__batch_size
         for b in range(0, len(X), batch_size):
             feed_dict = {}
             feed_dict[ self.__inputs[0] ] = X[b:b+batch_size]
@@ -307,7 +356,7 @@ class ConfigNetwork:
         tm = time.time()
         for it in range(self.__epoch):
             idx_list = []
-            for i in range(50):
+            for i in range(self.__batch_size):
                 idx_list.append( numpy.random.choice(range(len(X))) )
             sub_X = numpy.array( map(lambda i:X[i], idx_list) )
             sub_Y = numpy.array( map(lambda i:Y[i], idx_list) )
