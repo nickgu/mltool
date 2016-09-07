@@ -21,6 +21,21 @@ from sklearn import preprocessing
 from theano import tensor as T
 '''
 
+def precision_01(label, pred):
+    '''
+        return precision, total_count, correct_count
+        label.argmax ?= pred.argmax 
+    '''
+    total_count = len(label)
+    if isinstance(pred[0], float):
+        correct_count = len(filter(lambda x:x<.5, pred - label))
+    else:
+        a = [v.argmax() for v in label]
+        b = [v.argmax() for v in pred]
+        correct_count = len(filter(lambda x:x[0]==x[1], zip(a, b)))
+    return correct_count * 1. / total_count, total_count, correct_count
+
+
 import ConfigParser
 
 def weight_variable(shape):
@@ -78,6 +93,7 @@ class Layer_OpFullConnect(ILayer):
 
         # active function.
         if F is None:
+            print >> sys.stderr, 'Warning: FullConnectOp with no OP. [%s]' % op
             self.y = tf.matmul(self.x, self.w) + self.b
         else:
             self.y = F( tf.matmul(self.x, self.w) + self.b )
@@ -191,6 +207,46 @@ class Layer_PoolingMax(ILayer):
                     strides=[1, self.pooling_size, self.pooling_size, 1], 
                     padding='SAME')
 
+class Layer_Conv2D_Pooling(ILayer):
+    ''' 
+        Y = pooling(conv2d(X))
+        param:
+            shape       : window_x, window_y, in_chan, out_chan
+            pool_type   : max
+            pool_size   : pooling window size.
+    '''
+    def __init__(self, inputs, config_reader=None):
+        self.x = inputs[0]
+        # x, y, in_chan, out_chan
+        self.shape = map(int, config_reader('shape').split(','))
+        self.pool_size = int( config_reader('pool_size') )
+        self.pool_type = config_reader('pool_type') 
+
+
+        self.W = weight_variable(self.shape)
+        self.b = bias_variable([self.shape[3]])
+        print >> sys.stderr, 'Conv-shape : %s' % (self.shape)
+
+        # conv_out
+        conv_out = tf.nn.relu( 
+                    tf.nn.conv2d(
+                        self.x, 
+                        self.W, 
+                        strides=[1, 1, 1, 1], 
+                        padding='SAME'
+                    ) 
+                    + self.b 
+                )
+        # pool_out
+        if self.pool_type == 'max':
+            self.y = tf.nn.max_pool(conv_out,
+                ksize=[1, self.pool_size, self.pool_size, 1],
+                strides=[1, self.pool_size, self.pool_size, 1], 
+                padding='SAME')
+        else:
+            raise Exception('Pooling type is not set')
+
+
 class Layer_Reshape(ILayer):
     '''
         Y = reshape(X)
@@ -222,6 +278,7 @@ class ConfigNetwork:
                 'relu'              : Layer_Relu,
                 'conv2d'            : Layer_Conv2D,
                 'maxpool'           : Layer_PoolingMax,
+                'conv2d_pool'       : Layer_Conv2D_Pooling,
                 'reshape'           : Layer_Reshape,
                 'dropout'           : Layer_DropOut,
             }
@@ -237,6 +294,9 @@ class ConfigNetwork:
         self.__config_parser = cp
         self.__network_name = network_name
         cp.read(config_file)
+
+        # batch_size.
+        self.__batch_size = int(pydev.config_default_get(cp, network_name, 'batch_size', 50))
 
         input_count = int(cp.get(network_name, 'input_count'))
         print >> sys.stderr, 'input_count = %d' % input_count
@@ -274,7 +334,7 @@ class ConfigNetwork:
 
     def predict(self, X):
         ret = None
-        batch_size = 50
+        batch_size = self.__batch_size
         for b in range(0, len(X), batch_size):
             feed_dict = {}
             feed_dict[ self.__inputs[0] ] = X[b:b+batch_size]
@@ -307,7 +367,7 @@ class ConfigNetwork:
         tm = time.time()
         for it in range(self.__epoch):
             idx_list = []
-            for i in range(50):
+            for i in range(self.__batch_size):
                 idx_list.append( numpy.random.choice(range(len(X))) )
             sub_X = numpy.array( map(lambda i:X[i], idx_list) )
             sub_Y = numpy.array( map(lambda i:Y[i], idx_list) )
@@ -388,6 +448,7 @@ class ConfigNetwork:
 
     def __layer_config_reader(self, layer_name):
         return lambda opt: self.__config_parser.get(self.__network_name, ('%s.'%layer_name) + opt)
+
 
 if __name__=='__main__':
     pass
