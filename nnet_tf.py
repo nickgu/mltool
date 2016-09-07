@@ -21,22 +21,18 @@ from sklearn import preprocessing
 from theano import tensor as T
 '''
 
+import ConfigParser
+
 def precision_01(label, pred):
-    '''
-        return precision, total_count, correct_count
-        label.argmax ?= pred.argmax 
-    '''
     total_count = len(label)
     if isinstance(pred[0], float):
         correct_count = len(filter(lambda x:x<.5, pred - label))
     else:
-        a = [v.argmax() for v in label]
-        b = [v.argmax() for v in pred]
-        correct_count = len(filter(lambda x:x[0]==x[1], zip(a, b)))
-    return correct_count * 1. / total_count, total_count, correct_count
-
-
-import ConfigParser
+        a = [x.argmax() for x in label]
+        b = [x.argmax() for x in pred]
+        correct_count = len( filter(lambda x:x[0]==x[1], zip(a,b))) 
+    precision = correct_count * 1. / total_count
+    return precision, correct_count, total_count
 
 def weight_variable(shape):
     initial = tf.truncated_normal(shape, stddev=0.1)
@@ -207,27 +203,26 @@ class Layer_PoolingMax(ILayer):
                     strides=[1, self.pooling_size, self.pooling_size, 1], 
                     padding='SAME')
 
-class Layer_Conv2D_Pooling(ILayer):
+class Layer_Conv2DPooling(ILayer):
     ''' 
-        Y = pooling(conv2d(X))
+        Y = pooling( conv2d(X) )
         param:
             shape       : window_x, window_y, in_chan, out_chan
-            pool_type   : max
-            pool_size   : pooling window size.
+            pool_type   : [max]
+            pool_size   : window of [size x size] in pooling.
     '''
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         # x, y, in_chan, out_chan
         self.shape = map(int, config_reader('shape').split(','))
-        self.pool_size = int( config_reader('pool_size') )
-        self.pool_type = config_reader('pool_type') 
-
-
         self.W = weight_variable(self.shape)
         self.b = bias_variable([self.shape[3]])
+
+        self.pooling_size = int( config_reader('pool_size') )
+        self.pooling_type = config_reader('pool_type')
         print >> sys.stderr, 'Conv-shape : %s' % (self.shape)
 
-        # conv_out
+        # out_chan
         conv_out = tf.nn.relu( 
                     tf.nn.conv2d(
                         self.x, 
@@ -237,15 +232,15 @@ class Layer_Conv2D_Pooling(ILayer):
                     ) 
                     + self.b 
                 )
-        # pool_out
-        if self.pool_type == 'max':
-            self.y = tf.nn.max_pool(conv_out,
-                ksize=[1, self.pool_size, self.pool_size, 1],
-                strides=[1, self.pool_size, self.pool_size, 1], 
-                padding='SAME')
-        else:
-            raise Exception('Pooling type is not set')
 
+        print 'PoolingSize=%d' % self.pooling_size
+        if self.pooling_type == 'max':
+            self.y = tf.nn.max_pool(conv_out, 
+                        ksize=[1, self.pooling_size, self.pooling_size, 1],
+                        strides=[1, self.pooling_size, self.pooling_size, 1], 
+                        padding='SAME')
+        else:
+            print >> sys.stderr, 'Bad pooling type: %s' % self.pooling_type
 
 class Layer_Reshape(ILayer):
     '''
@@ -278,7 +273,7 @@ class ConfigNetwork:
                 'relu'              : Layer_Relu,
                 'conv2d'            : Layer_Conv2D,
                 'maxpool'           : Layer_PoolingMax,
-                'conv2d_pool'       : Layer_Conv2D_Pooling,
+                'conv2d_pool'       : Layer_Conv2DPooling,
                 'reshape'           : Layer_Reshape,
                 'dropout'           : Layer_DropOut,
             }
@@ -307,6 +302,7 @@ class ConfigNetwork:
         active_name = cp.get(network_name, 'active').strip()
         cost_name = cp.get(network_name, 'cost').strip()
 
+        self.__batch_size = int( pydev.config_default_get(cp, network_name, 'batch_size', 50) )
         self.__learning_rate = float( pydev.config_default_get(cp, network_name, 'learning_rate', 1e-3) )
         print >> sys.stderr, 'LearningRate : %.5f' % self.__learning_rate
         self.__epoch = int( pydev.config_default_get(cp, network_name, 'epoch', 1000) )
@@ -329,7 +325,7 @@ class ConfigNetwork:
         # training function.
         self.train = tf.train.AdamOptimizer( self.__learning_rate ).minimize(self.cost)
 
-        self.session = tf.Session()
+        self.session = tf.Session(config=tf.ConfigProto(log_device_placement=True))
         self.session.run( tf.initialize_all_variables() )
 
     def predict(self, X):
@@ -373,10 +369,10 @@ class ConfigNetwork:
             sub_Y = numpy.array( map(lambda i:Y[i], idx_list) )
 
             self.fit_one_batch(sub_X, sub_Y)
-            if it % 10 == 0:
+            if it % 100 == 0:
                 cost = self.calc_cost(sub_X, sub_Y)
                 diff_tm = time.time() - tm
-                print 'iter=%d, cost=%.3f, tm=%.3f' % (it, cost, diff_tm)
+                print >> sys.stderr, 'iter=%d, cost=%.5f, tm=%.3f' % (it, cost, diff_tm)
                 tm = time.time()
 
     def calc_cost(self, *args):
@@ -390,6 +386,11 @@ class ConfigNetwork:
                 feed_dict[ self.__label ] = item
             else:
                 feed_dict[ self.__inputs[idx] ] = item
+
+        # debug cost.
+        y = self.active.eval(feed_dict=feed_dict, session=self.session)
+        #print 'y[0]:' +  str(y[0]) 
+        #print 'label:' + str(feed_dict[ self.__label ][0])
 
         final_cost = self.cost.eval(feed_dict=feed_dict, session=self.session)
         return final_cost
