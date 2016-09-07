@@ -325,8 +325,16 @@ class ConfigNetwork:
         # training function.
         self.train = tf.train.AdamOptimizer( self.__learning_rate ).minimize(self.cost)
 
-        self.session = tf.Session(config=tf.ConfigProto(log_device_placement=True))
-        self.session.run( tf.initialize_all_variables() )
+        self.session = tf.Session()
+        #self.session = tf.Session(config=tf.ConfigProto(log_device_placement=True))
+
+    def save(self, model):
+        saver = tf.train.Saver()
+        saver.save(self.session, model)
+
+    def load(self, model):
+        saver = tf.train.Saver()
+        saver.restore(self.session, model)
 
     def predict(self, X):
         ret = None
@@ -359,6 +367,9 @@ class ConfigNetwork:
     '''
 
     def fit(self, X, Y):
+        # init all variables.
+        self.session.run( tf.initialize_all_variables() )
+
         # simple train.
         tm = time.time()
         for it in range(self.__epoch):
