@@ -302,11 +302,13 @@ class ConfigNetwork:
         active_name = cp.get(network_name, 'active').strip()
         cost_name = cp.get(network_name, 'cost').strip()
 
-        self.__batch_size = int( pydev.config_default_get(cp, network_name, 'batch_size', 50) )
         self.__learning_rate = float( pydev.config_default_get(cp, network_name, 'learning_rate', 1e-3) )
         print >> sys.stderr, 'LearningRate : %.5f' % self.__learning_rate
-        self.__epoch = int( pydev.config_default_get(cp, network_name, 'epoch', 1000) )
-        print >> sys.stderr, 'Epoch : %d' % self.__epoch
+
+        self.__batch_size = int( pydev.config_default_get(cp, network_name, 'batch_size', 50) )
+        self.__epoch = int( pydev.config_default_get(cp, network_name, 'epoch', 10) )
+        print >> sys.stderr, 'Epoch     : %d' % self.__epoch
+        print >> sys.stderr, 'BatchSize : %d' % self.__batch_size
    
         for layer_name in layer_names:
             layer_type = cp.get(network_name, '%s.type' % layer_name)
@@ -324,6 +326,10 @@ class ConfigNetwork:
         self.cost = self.__get_layer(cost_name).y
         # training function.
         self.train = tf.train.AdamOptimizer( self.__learning_rate ).minimize(self.cost)
+
+        # Generate moving averages of all losses and associated summaries.
+        self.__add_loss_summaries(self.cost)
+        self.__train_summary_merged = tf.merge_all_summaries()
 
         self.session = tf.Session()
         #self.session = tf.Session(config=tf.ConfigProto(log_device_placement=True))
@@ -353,37 +359,35 @@ class ConfigNetwork:
                 ret = numpy.append(ret, partial_ret, axis=0)
         return ret
 
-    '''
-    def predict(self, *args):
-        feed_dict = {}
-        for idx, item in enumerate(args):
-            feed_dict[ self.__inputs[idx] ] = item
-
-        ret = self.active.eval(feed_dict=feed_dict, session=self.session)
-        if self.__output_01:
-            for x in numpy.nditer(ret, op_flags=['readwrite']):
-                x[...] = 1. if x[...]>=.5 else 0.
-        return ret
-    '''
-
     def fit(self, X, Y):
+        self.__train_writer = tf.train.SummaryWriter(
+                            'tensorboard/train',
+                            self.session.graph)
+
         # init all variables.
         self.session.run( tf.initialize_all_variables() )
 
         # simple train.
         tm = time.time()
-        for it in range(self.__epoch):
-            idx_list = []
-            for i in range(self.__batch_size):
-                idx_list.append( numpy.random.choice(range(len(X))) )
-            sub_X = numpy.array( map(lambda i:X[i], idx_list) )
-            sub_Y = numpy.array( map(lambda i:Y[i], idx_list) )
+        data_size = len(X)
+        iteration_count = (self.__epoch * data_size) // self.__batch_size
+        print >> sys.stderr, 'Iteration=%d (batchsize=%d, epoch=%d, datasize=%d)' % (
+                iteration_count, self.__batch_size, self.__epoch, data_size)
+        offset = 0
+        self.__current_iteration = 0
+        for it in xrange( iteration_count ):
+            self.__current_iteration = it
+            sub_X = X[offset : offset+self.__batch_size, ...]
+            sub_Y = Y[offset : offset+self.__batch_size, ...]
+            offset = (offset + self.__batch_size) % data_size
 
-            self.fit_one_batch(sub_X, sub_Y)
-            if it % 100 == 0:
-                cost = self.calc_cost(sub_X, sub_Y)
+            cost, summary_info = self.fit_one_batch(sub_X, sub_Y)
+            self.__train_writer.add_summary(summary_info, self.__current_iteration)
+
+            if (it+1) % 10 == 0:
                 diff_tm = time.time() - tm
-                print >> sys.stderr, 'iter=%d, cost=%.5f, tm=%.3f' % (it, cost, diff_tm)
+                print >> sys.stderr, 'iter=%d/%d, cost=%.5f, tm=%.3f' % (
+                        it+1, iteration_count, cost, diff_tm)
                 tm = time.time()
 
     def calc_cost(self, *args):
@@ -418,8 +422,14 @@ class ConfigNetwork:
             else:
                 feed_dict[ self.__inputs[idx] ] = item
 
+        summary_info, cost, _ = self.session.run(
+                [self.__train_summary_merged, self.cost, self.train], 
+                feed_dict=feed_dict)
+        return cost, summary_info
+        '''
         self.train.run(session=self.session,
                 feed_dict=feed_dict)
+        '''
 
     def __init_layer(self, name):
         print >> sys.stderr, 'Try to init layer [%s]' % name
@@ -460,6 +470,25 @@ class ConfigNetwork:
 
     def __layer_config_reader(self, layer_name):
         return lambda opt: self.__config_parser.get(self.__network_name, ('%s.'%layer_name) + opt)
+
+    def __add_loss_summaries(self, total_loss):
+        tf.scalar_summary('total_loss', total_loss)
+
+        '''
+        # Compute the moving average of all individual losses and the total loss.
+        loss_averages = tf.train.ExponentialMovingAverage(0.9, name='avg')
+        losses = tf.get_collection('losses')
+        loss_averages_op = loss_averages.apply(losses + [total_loss])
+
+        # Attach a scalar summary to all individual losses and the total loss; do the
+        # same for the averaged version of the losses.
+        for l in losses + [total_loss]:
+            # Name each loss as '(raw)' and name the moving average version of the loss
+            # as the original loss name.
+            tf.scalar_summary(l.op.name +' (raw)', l)
+            tf.scalar_summary(l.op.name, loss_averages.average(l))
+        return loss_averages_op
+        '''
 
 
 if __name__=='__main__':
