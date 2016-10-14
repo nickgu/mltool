@@ -359,7 +359,15 @@ class ConfigNetwork:
                 ret = numpy.append(ret, partial_ret, axis=0)
         return ret
 
-    def fit(self, X, Y):
+    def fit(self, X, Y, callback=None, callback_interval=0.01):
+        '''
+            X : training X
+            Y : training Y
+            callback : callback when training. callback type: callback(predict_function)
+            callback_interval : interval to call back (total 1.0)
+        '''
+
+        # tensor board train_writer.
         self.__train_writer = tf.train.SummaryWriter(
                             'tensorboard/train',
                             self.session.graph)
@@ -375,7 +383,10 @@ class ConfigNetwork:
                 iteration_count, self.__batch_size, self.__epoch, data_size)
         offset = 0
         self.__current_iteration = 0
+
+        last_percentage = 0
         for it in xrange( iteration_count ):
+            # training code.
             self.__current_iteration = it
             sub_X = X[offset : offset+self.__batch_size, ...]
             sub_Y = Y[offset : offset+self.__batch_size, ...]
@@ -384,11 +395,22 @@ class ConfigNetwork:
             cost, summary_info = self.fit_one_batch(sub_X, sub_Y)
             self.__train_writer.add_summary(summary_info, self.__current_iteration)
 
+            # Report code.
+            percentage = it * 1. / iteration_count
+            if callback:
+                if percentage - last_percentage >= callback_interval:
+                    callback(self.predict)
+                    last_percentage = percentage
+
+            sys.stderr.write('%cTraining progress: %3.1f%%' % (13, percentage * 100.))
+
+            '''
             if (it+1) % 10 == 0:
                 diff_tm = time.time() - tm
                 print >> sys.stderr, 'iter=%d/%d, cost=%.5f, tm=%.3f' % (
                         it+1, iteration_count, cost, diff_tm)
                 tm = time.time()
+            '''
 
     def calc_cost(self, *args):
         # simple N epoch train.
