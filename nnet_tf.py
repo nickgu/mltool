@@ -113,6 +113,14 @@ class Layer_FullConnect(ILayer):
         # active function.
         self.y = tf.matmul(self.x, self.w) + self.b
 
+class Layer_LocalResponseNormalization(ILayer):
+    ''' 
+    '''
+    def __init__(self, inputs, config_reader=None):
+        self.x = inputs[0]
+        # active function.
+        self.y = tf.nn.local_response_normalization(self.x)
+
 class Layer_Dot(ILayer):
     '''
         Y = X1 * X2
@@ -205,10 +213,10 @@ class Layer_PoolingMax(ILayer):
 
 class Layer_Conv2DPooling(ILayer):
     ''' 
-        Y = pooling( conv2d(X) )
+        Y = pooling( relu(conv2d(X)) )
         param:
             shape       : window_x, window_y, in_chan, out_chan
-            pool_type   : [max]
+            pool_type   : [max, avg]
             pool_size   : window of [size x size] in pooling.
     '''
     def __init__(self, inputs, config_reader=None):
@@ -236,6 +244,11 @@ class Layer_Conv2DPooling(ILayer):
         print 'PoolingSize=%d' % self.pooling_size
         if self.pooling_type == 'max':
             self.y = tf.nn.max_pool(conv_out, 
+                        ksize=[1, self.pooling_size, self.pooling_size, 1],
+                        strides=[1, self.pooling_size, self.pooling_size, 1], 
+                        padding='SAME')
+        elif self.pooling_type == 'avg':
+            self.y = tf.nn.avg_pool(conv_out, 
                         ksize=[1, self.pooling_size, self.pooling_size, 1],
                         strides=[1, self.pooling_size, self.pooling_size, 1], 
                         padding='SAME')
@@ -276,6 +289,7 @@ class ConfigNetwork:
                 'conv2d_pool'       : Layer_Conv2DPooling,
                 'reshape'           : Layer_Reshape,
                 'dropout'           : Layer_DropOut,
+                'local_norm'        : Layer_LocalResponseNormalization,
             }
 
         self.__output_01 = output_01
@@ -302,6 +316,13 @@ class ConfigNetwork:
         active_name = cp.get(network_name, 'active').strip()
         cost_name = cp.get(network_name, 'cost').strip()
 
+        global_step = tf.Variable(0, trainable=False)
+        decay_lr = tf.train.exponential_decay(0.001,
+                  global_step,
+                  300, 0.96, staircase=True)
+        tf.scalar_summary('learning_rate', decay_lr)
+        self.lr = decay_lr
+
         self.__learning_rate = float( pydev.config_default_get(cp, network_name, 'learning_rate', 1e-3) )
         print >> sys.stderr, 'LearningRate : %.5f' % self.__learning_rate
 
@@ -325,7 +346,9 @@ class ConfigNetwork:
         # cost function.
         self.cost = self.__get_layer(cost_name).y
         # training function.
-        self.train = tf.train.AdamOptimizer( self.__learning_rate ).minimize(self.cost)
+        #self.train = tf.train.AdamOptimizer( self.__learning_rate ).minimize(self.cost, global_step=global_step)
+        self.train = tf.train.AdamOptimizer( decay_lr ).minimize(self.cost, global_step=global_step)
+        #self.train = tf.train.GradientDescentOptimizer( 0.00001 ).minimize(self.cost, global_step=global_step)
 
         # Generate moving averages of all losses and associated summaries.
         self.__add_loss_summaries(self.cost)
@@ -359,12 +382,13 @@ class ConfigNetwork:
                 ret = numpy.append(ret, partial_ret, axis=0)
         return ret
 
-    def fit(self, X, Y, callback=None, callback_interval=0.01):
+    def fit(self, X, Y, callback=None, callback_iteration=100):
         '''
             X : training X
             Y : training Y
             callback : callback when training. callback type: callback(predict_function)
             callback_interval : interval to call back (total 1.0)
+            callback_iteration : callback each N iterations.
         '''
 
         # tensor board train_writer.
@@ -385,6 +409,7 @@ class ConfigNetwork:
         self.__current_iteration = 0
 
         last_percentage = 0
+        last_callback_iteration = 0
         for it in xrange( iteration_count ):
             # training code.
             self.__current_iteration = it
@@ -392,17 +417,24 @@ class ConfigNetwork:
             sub_Y = Y[offset : offset+self.__batch_size, ...]
             offset = (offset + self.__batch_size) % data_size
 
-            cost, summary_info = self.fit_one_batch(sub_X, sub_Y)
+            cost, summary_info, lr = self.fit_one_batch(sub_X, sub_Y)
             self.__train_writer.add_summary(summary_info, self.__current_iteration)
 
             # Report code.
             percentage = it * 1. / iteration_count
             if callback:
+                if it - last_callback_iteration >= callback_iteration:
+                    callback(self.predict)
+                    last_callback_iteration = it
+                '''
+                # callback by percentage.
                 if percentage - last_percentage >= callback_interval:
                     callback(self.predict)
                     last_percentage = percentage
+                '''
 
-            sys.stderr.write('%cTraining progress: %3.1f%%' % (13, percentage * 100.))
+            sys.stderr.write('%cTraining progress: %3.1f%% [cur_loss=%.4f, lr=%f]' % (
+                13, percentage * 100., cost, lr))
 
             '''
             if (it+1) % 10 == 0:
@@ -444,10 +476,10 @@ class ConfigNetwork:
             else:
                 feed_dict[ self.__inputs[idx] ] = item
 
-        summary_info, cost, _ = self.session.run(
-                [self.__train_summary_merged, self.cost, self.train], 
+        summary_info, cost, lr, _ = self.session.run(
+                [self.__train_summary_merged, self.cost, self.lr, self.train], 
                 feed_dict=feed_dict)
-        return cost, summary_info
+        return cost, summary_info, lr
         '''
         self.train.run(session=self.session,
                 feed_dict=feed_dict)
