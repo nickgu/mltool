@@ -8,20 +8,12 @@ import sys
 from abc import ABCMeta, abstractmethod
 import time
 
+import numpy
+import numpy.random
+import ConfigParser
 
 import pydev
 import tensorflow as tf
-import numpy
-import numpy.random
-
-'''
-import numpy
-import theano
-from sklearn import preprocessing
-from theano import tensor as T
-'''
-
-import ConfigParser
 
 def precision_01(label, pred):
     total_count = len(label)
@@ -34,20 +26,24 @@ def precision_01(label, pred):
     precision = correct_count * 1. / total_count
     return precision, correct_count, total_count
 
-def weight_variable(shape):
+def weight_variable(shape, l2_weight=0.000):
     initial = tf.truncated_normal(shape, stddev=0.1)
-    return tf.Variable(initial)
+    weight = tf.Variable(initial)
 
-def bias_variable(shape):
+    if l2_weight > 0:
+        losses = tf.mul(tf.nn.l2_loss(weight), l2_weight, 'weighted_loss')
+        tf.add_to_collection('losses', losses)
+
+    return weight
+
+def bias_variable(shape, l2_weight=0.000):
     initial = tf.constant(0.1, shape=shape)
-    return tf.Variable(initial)
+    bias = tf.Variable(initial)
 
-'''
-class LearningConfig:
-    def __init__(self, learning_rate=0.1):
-        self.learning_rate = learning_rate
-        #self.symbol_learning_rate = T.scalar()
-'''
+    if l2_weight > 0:
+        losses = tf.mul(tf.nn.l2_loss(bias), l2_weight, 'weighted_loss')
+        tf.add_to_collection('losses', losses)
+    return bias
 
 class ILayer:
     '''
@@ -69,11 +65,14 @@ class Layer_OpFullConnect(ILayer):
             n_in    : input_count
             n_out   : output_count
             op      : operator: sigmoid|tanh|softmax|relu
+            l2_wd   : L2 weight.
     '''
     def __init__(self, inputs, config_reader=None):
         n_in = int( config_reader('n_in') )
         n_out = int( config_reader('n_out') )
         op = config_reader('op')
+        self.l2wd = float(config_reader('l2wd', 0.0))
+        print >> sys.stderr, 'l2 weight : %f' % self.l2wd
 
         Fdict = {
             'sigmoid'   : tf.sigmoid,
@@ -84,8 +83,8 @@ class Layer_OpFullConnect(ILayer):
         F = Fdict.get(op, None)
 
         self.x = inputs[0]
-        self.w = weight_variable([n_in, n_out])
-        self.b = bias_variable([n_out])
+        self.w = weight_variable([n_in, n_out], l2_weight=self.l2wd)
+        self.b = bias_variable([n_out], l2_weight=self.l2wd)
 
         # active function.
         if F is None:
@@ -101,14 +100,17 @@ class Layer_FullConnect(ILayer):
         param:
             n_in    : input_count
             n_out   : output_count
+            l2wd    : l2 weight.
     '''
     def __init__(self, inputs, config_reader=None):
         n_in = int( config_reader('n_in') )
         n_out = int( config_reader('n_out') )
+        self.l2wd = float(config_reader('l2wd', 0.0))
+        print >> sys.stderr, 'l2 weight : %f' % self.l2wd
 
         self.x = inputs[0]
-        self.w = weight_variable([n_in, n_out])
-        self.b = bias_variable([n_out])
+        self.w = weight_variable([n_in, n_out], l2_weight=self.l2wd)
+        self.b = bias_variable([n_out], l2_weight=self.l2wd)
 
         # active function.
         self.y = tf.matmul(self.x, self.w) + self.b
@@ -116,10 +118,16 @@ class Layer_FullConnect(ILayer):
 class Layer_LocalResponseNormalization(ILayer):
     ''' 
     '''
+    #TODO make config.
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         # active function.
-        self.y = tf.nn.local_response_normalization(self.x)
+        #self.y = tf.nn.local_response_normalization(self.x)
+        self.y = tf.nn.local_response_normalization(self.x,
+                4, 
+                bias=1.0, 
+                alpha=0.001 / 9.0, 
+                beta=0.75)
 
 class Layer_Dot(ILayer):
     '''
@@ -160,6 +168,12 @@ class Layer_Norm2Cost(ILayer):
         self.label = inputs[1]
         self.y = tf.reduce_mean( (self.x - self.label) ** 2 )
 
+class Layer_SoftmaxEntropyCost(ILayer):
+    def __init__(self, inputs, config_reader=None):
+        self.x = inputs[0]
+        self.label = inputs[1]
+        self.y = tf.reduce_mean( tf.nn.sparse_softmax_cross_entropy_with_logits(self.x, self.label) )
+
 class Layer_DropOut(ILayer):
     ''' 
         Y = drop_out(X) 
@@ -179,10 +193,14 @@ class Layer_Conv2D(ILayer):
     '''
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
-        # x, y, in_chan, out_chan
         self.shape = map(int, config_reader('shape').split(','))
-        self.W = weight_variable(self.shape)
-        self.b = bias_variable([self.shape[3]])
+        self.l2wd = float(config_reader('l2wd', 0.0))
+
+        # x, y, in_chan, out_chan
+        self.W = weight_variable(self.shape, l2_weight=self.l2wd)
+        self.b = bias_variable([self.shape[3]], l2_weight=self.l2wd)
+
+        print >> sys.stderr, 'l2 weight : %f' % self.l2wd
         print >> sys.stderr, 'Conv-shape : %s' % (self.shape)
 
         # out_chan
@@ -196,20 +214,33 @@ class Layer_Conv2D(ILayer):
                     + self.b 
                 )
 
-class Layer_PoolingMax(ILayer):
+class Layer_Pooling(ILayer):
     '''
-        Y = pooling_max(X)
+        Y = pooling(X)
         param:
-            size    :  window of [size x size]
+            pool_type   : [max, avg]
+            pool_size   : window of [size x size] in pooling.
+            pool_strides: strides of [size x size] in pooling.
     '''
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
-        self.pooling_size = int( config_reader('size') )
-        print 'PoolingSize=%d' % self.pooling_size
-        self.y = tf.nn.max_pool(self.x, 
-                    ksize=[1, self.pooling_size, self.pooling_size, 1],
-                    strides=[1, self.pooling_size, self.pooling_size, 1], 
-                    padding='SAME')
+        self.pooling_size = int( config_reader('pool_size') )
+        self.pooling_strides = int( config_reader('pool_strides') )
+        self.pooling_type = config_reader('pool_type')
+
+        print >> sys.stderr, 'PoolingSize=%d' % self.pooling_size
+        if self.pooling_type == 'max':
+            self.y = tf.nn.max_pool(self.x, 
+                        ksize=[1, self.pooling_size, self.pooling_size, 1],
+                        strides=[1, self.pooling_strides, self.pooling_strides, 1], 
+                        padding='SAME')
+        elif self.pooling_type == 'avg':
+            self.y = tf.nn.avg_pool(self.x, 
+                        ksize=[1, self.pooling_size, self.pooling_size, 1],
+                        strides=[1, self.pooling_strides, self.pooling_strides, 1], 
+                        padding='SAME')
+        else:
+            print >> sys.stderr, 'Bad pooling type: %s' % self.pooling_type
 
 class Layer_Conv2DPooling(ILayer):
     ''' 
@@ -218,15 +249,21 @@ class Layer_Conv2DPooling(ILayer):
             shape       : window_x, window_y, in_chan, out_chan
             pool_type   : [max, avg]
             pool_size   : window of [size x size] in pooling.
+            pool_strides: strides of [size x size] in pooling.
     '''
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         # x, y, in_chan, out_chan
         self.shape = map(int, config_reader('shape').split(','))
-        self.W = weight_variable(self.shape)
-        self.b = bias_variable([self.shape[3]])
+        self.l2wd = float(config_reader('l2wd', 0.0))
+
+        print >> sys.stderr, 'l2 weight : %f' % self.l2wd
+
+        self.W = weight_variable(self.shape, l2_weight=self.l2wd)
+        self.b = bias_variable([self.shape[3]], l2_weight=self.l2wd)
 
         self.pooling_size = int( config_reader('pool_size') )
+        self.pooling_strides = int( config_reader('pool_strides') )
         self.pooling_type = config_reader('pool_type')
         print >> sys.stderr, 'Conv-shape : %s' % (self.shape)
 
@@ -245,12 +282,12 @@ class Layer_Conv2DPooling(ILayer):
         if self.pooling_type == 'max':
             self.y = tf.nn.max_pool(conv_out, 
                         ksize=[1, self.pooling_size, self.pooling_size, 1],
-                        strides=[1, self.pooling_size, self.pooling_size, 1], 
+                        strides=[1, self.pooling_strides, self.pooling_strides, 1], 
                         padding='SAME')
         elif self.pooling_type == 'avg':
             self.y = tf.nn.avg_pool(conv_out, 
                         ksize=[1, self.pooling_size, self.pooling_size, 1],
-                        strides=[1, self.pooling_size, self.pooling_size, 1], 
+                        strides=[1, self.pooling_strides, self.pooling_strides, 1], 
                         padding='SAME')
         else:
             print >> sys.stderr, 'Bad pooling type: %s' % self.pooling_type
@@ -280,12 +317,13 @@ class ConfigNetwork:
                 'full_connect_op'   : Layer_OpFullConnect,
                 'dot'               : Layer_Dot,
                 'norm2'             : Layer_Norm2Cost,
+                'softmax_entropy'   : Layer_SoftmaxEntropyCost,
                 'sigmoid'           : Layer_Sigmoid,
                 'softmax'           : Layer_Softmax,
                 'tanh'              : Layer_Tanh,
                 'relu'              : Layer_Relu,
                 'conv2d'            : Layer_Conv2D,
-                'maxpool'           : Layer_PoolingMax,
+                'pooling'           : Layer_Pooling,
                 'conv2d_pool'       : Layer_Conv2DPooling,
                 'reshape'           : Layer_Reshape,
                 'dropout'           : Layer_DropOut,
@@ -294,8 +332,6 @@ class ConfigNetwork:
 
         self.__output_01 = output_01
 
-        self.__inputs = []
-        self.__label = tf.placeholder(tf.float32, shape=[None, None])
         self.__layers = []
         self.__layers_info = {}
 
@@ -304,27 +340,22 @@ class ConfigNetwork:
         self.__network_name = network_name
         cp.read(config_file)
 
+        # read inputs and label.
+        self.__inputs = self.__placeholders_read( 
+                pydev.config_default_get(cp, network_name, 'input_def', 'f:2') )
+        self.__label = self.__single_placeholder_read( 
+                pydev.config_default_get(cp, network_name, 'label_def', 'f:2') )
+        pydev.log('Inputs: %s' % self.__inputs)
+        pydev.log('Labels  %s' % self.__label)
+
         # batch_size.
         self.__batch_size = int(pydev.config_default_get(cp, network_name, 'batch_size', 50))
-
-        input_count = int(cp.get(network_name, 'input_count'))
-        print >> sys.stderr, 'input_count = %d' % input_count
-        for i in range(input_count):
-            self.__inputs.append( tf.placeholder(tf.float32, shape=[None, None]) )
 
         layer_names = cp.get(network_name, 'layers').split(',')
         active_name = cp.get(network_name, 'active').strip()
         cost_name = cp.get(network_name, 'cost').strip()
 
         global_step = tf.Variable(0, trainable=False)
-        decay_lr = tf.train.exponential_decay(0.001,
-                  global_step,
-                  300, 0.96, staircase=True)
-        tf.scalar_summary('learning_rate', decay_lr)
-        self.lr = decay_lr
-
-        self.__learning_rate = float( pydev.config_default_get(cp, network_name, 'learning_rate', 1e-3) )
-        print >> sys.stderr, 'LearningRate : %.5f' % self.__learning_rate
 
         self.__batch_size = int( pydev.config_default_get(cp, network_name, 'batch_size', 50) )
         self.__epoch = int( pydev.config_default_get(cp, network_name, 'epoch', 10) )
@@ -338,17 +369,58 @@ class ConfigNetwork:
             # type, inputs, layer_refer.
             self.__layers_info[layer_name] = [layer_type, input_names, None]
         
+        self.__layer_has_receiver = set()
         for name in layer_names:
             self.__init_layer(name)
+
+        # check receivers.
+        warning_layers = []
+        for name in layer_names:
+            if name not in self.__layer_has_receiver:
+                warning_layers.append(name)
+        if len(warning_layers)>0:
+            pydev.err('Layers of no receivers, check it : %s' % ','.join(warning_layers))
 
         # make network-active function.
         self.active = self.__get_layer(active_name).y
         # cost function.
         self.cost = self.__get_layer(cost_name).y
-        # training function.
-        #self.train = tf.train.AdamOptimizer( self.__learning_rate ).minimize(self.cost, global_step=global_step)
-        self.train = tf.train.AdamOptimizer( decay_lr ).minimize(self.cost, global_step=global_step)
-        #self.train = tf.train.GradientDescentOptimizer( 0.00001 ).minimize(self.cost, global_step=global_step)
+
+        # TODO. add l2 loss.
+        tf.add_to_collection('losses', self.__get_layer(cost_name).y)
+        self.cost = tf.add_n(tf.get_collection('losses'), name='total_loss')
+
+
+        # learning method and learning rate.
+        self.__learner = pydev.config_dict_get(cp, network_name, 'learner', 
+                {
+                    'gradient'  : tf.train.GradientDescentOptimizer,
+                    'adam'      : tf.train.AdamOptimizer,
+                }, default_key='gradient'
+                )
+
+                
+        self.__lr_value = float( pydev.config_default_get(cp, network_name, 'learning_rate', 1e-3) )
+        self.__lr_decay_ratio = float( pydev.config_default_get(cp, network_name, 'learning_decay_ratio', 0.96) )
+        self.__lr_decay_step = float( pydev.config_default_get(cp, network_name, 'learning_decay_step', 300) )
+        self.__lr_tensor = pydev.config_dict_get(cp, network_name, 'learning_rate_type', 
+                {
+                    'fixed'             : tf.Variable(self.__lr_value),
+                    'exponential_decay' : tf.train.exponential_decay(self.__lr_value, global_step, 
+                        self.__lr_decay_step, self.__lr_decay_ratio, staircase=True)
+                }, default_key = 'fixed'
+            )
+
+        pydev.log('learner : %s' % self.__learner)
+        pydev.log('lr_type : %s' % self.__lr_tensor)
+        pydev.log('lr_value: %s' % self.__lr_value)
+        pydev.log('lr_step : %s' % self.__lr_decay_step)
+        pydev.log('lr_ratio: %s' % self.__lr_decay_ratio)
+
+        tf.scalar_summary('train/learning_rate', self.__lr_tensor)
+
+        # generate training function.
+        self.train = self.__learner( self.__lr_tensor ).minimize(self.cost, global_step=global_step)
 
         # Generate moving averages of all losses and associated summaries.
         self.__add_loss_summaries(self.cost)
@@ -393,7 +465,7 @@ class ConfigNetwork:
 
         # tensor board train_writer.
         self.__train_writer = tf.train.SummaryWriter(
-                            'tensorboard/train',
+                            './tb_dir',
                             self.session.graph)
 
         # init all variables.
@@ -424,7 +496,7 @@ class ConfigNetwork:
             percentage = it * 1. / iteration_count
             if callback:
                 if it - last_callback_iteration >= callback_iteration:
-                    callback(self.predict)
+                    callback(self.predict, self.__train_writer, self.__current_iteration)
                     last_callback_iteration = it
                 '''
                 # callback by percentage.
@@ -470,23 +542,21 @@ class ConfigNetwork:
         # last one is label.
         for idx, item in enumerate(args):
             if idx == len(args)-1:
+                # TODO: shape is not fixed.
+                ''' 
                 if len(item.shape) == 1:
                     item.shape = (item.shape[0], 1)
+                '''
                 feed_dict[ self.__label ] = item
             else:
                 feed_dict[ self.__inputs[idx] ] = item
 
         summary_info, cost, lr, _ = self.session.run(
-                [self.__train_summary_merged, self.cost, self.lr, self.train], 
+                [self.__train_summary_merged, self.cost, self.__lr_tensor, self.train], 
                 feed_dict=feed_dict)
         return cost, summary_info, lr
-        '''
-        self.train.run(session=self.session,
-                feed_dict=feed_dict)
-        '''
 
     def __init_layer(self, name):
-        print >> sys.stderr, 'Try to init layer [%s]' % name
         ltype, inames, layer = self.__layers_info.get(name, ['', [], None])
 
         if layer is not None:
@@ -508,8 +578,12 @@ class ConfigNetwork:
                 l = self.__init_layer(sub_name)
                 inputs.append(l.y)
 
+                # sub layer has receiver
+                self.__layer_has_receiver.add(sub_name)
+
         config_reader = self.__layer_config_reader(name)
         creator = self.__LayerCreator__[ltype]
+        print >> sys.stderr, '---- Init layer [%s] of type %s ----' % (name, ltype)
         layer = creator(inputs, config_reader)
 
         # for random access.
@@ -518,32 +592,30 @@ class ConfigNetwork:
         self.__layers.append(layer)
         return layer
 
+    def __placeholders_read(self, config):
+        ret = []
+        for elem in config.split(','):
+            ret.append(self.__single_placeholder_read(elem))
+        return ret
+
+    def __single_placeholder_read(self, elem):
+        type_s, shape_s = elem.split(':')
+        t = {
+            'i': tf.int32,
+            'f': tf.float32,
+                }.get(type_s, tf.float32)
+        shape = [None] * int(shape_s)
+        return tf.placeholder(t, shape)
+
     def __get_layer(self, name):
         ltype, inames, layer = self.__layers_info.get(name, ['', [], None])
         return layer
 
     def __layer_config_reader(self, layer_name):
-        return lambda opt: self.__config_parser.get(self.__network_name, ('%s.'%layer_name) + opt)
+        return lambda opt,default_value=None: pydev.config_default_get(self.__config_parser, self.__network_name, ('%s.'%layer_name) + opt, default_value)
 
     def __add_loss_summaries(self, total_loss):
-        tf.scalar_summary('total_loss', total_loss)
-
-        '''
-        # Compute the moving average of all individual losses and the total loss.
-        loss_averages = tf.train.ExponentialMovingAverage(0.9, name='avg')
-        losses = tf.get_collection('losses')
-        loss_averages_op = loss_averages.apply(losses + [total_loss])
-
-        # Attach a scalar summary to all individual losses and the total loss; do the
-        # same for the averaged version of the losses.
-        for l in losses + [total_loss]:
-            # Name each loss as '(raw)' and name the moving average version of the loss
-            # as the original loss name.
-            tf.scalar_summary(l.op.name +' (raw)', l)
-            tf.scalar_summary(l.op.name, loss_averages.average(l))
-        return loss_averages_op
-        '''
-
+        tf.scalar_summary('train/total_loss', total_loss)
 
 if __name__=='__main__':
     pass
