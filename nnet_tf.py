@@ -11,6 +11,7 @@ import time
 import numpy
 import numpy.random
 import ConfigParser
+import random
 
 import pydev
 import tensorflow as tf
@@ -26,8 +27,8 @@ def precision_01(label, pred):
     precision = correct_count * 1. / total_count
     return precision, correct_count, total_count
 
-def weight_variable(shape, l2_weight=0.000):
-    initial = tf.truncated_normal(shape, stddev=0.1)
+def weight_variable(shape, l2_weight=0.000, stddev=0.01):
+    initial = tf.truncated_normal(shape, stddev=stddev)
     weight = tf.Variable(initial)
 
     if l2_weight > 0:
@@ -36,13 +37,9 @@ def weight_variable(shape, l2_weight=0.000):
 
     return weight
 
-def bias_variable(shape, l2_weight=0.000):
-    initial = tf.constant(0.1, shape=shape)
+def bias_variable(shape, init=0.0):
+    initial = tf.constant(init, shape=shape)
     bias = tf.Variable(initial)
-
-    if l2_weight > 0:
-        losses = tf.mul(tf.nn.l2_loss(bias), l2_weight, 'weighted_loss')
-        tf.add_to_collection('losses', losses)
     return bias
 
 class ILayer:
@@ -72,7 +69,12 @@ class Layer_OpFullConnect(ILayer):
         n_out = int( config_reader('n_out') )
         op = config_reader('op')
         self.l2wd = float(config_reader('l2wd', 0.0))
-        print >> sys.stderr, 'l2 weight : %f' % self.l2wd
+        self.bias_init = float(config_reader('bias_init', 0.0))
+        self.weight_stddev = float(config_reader('weight_stddev', 0.01))
+        
+        pydev.log('l2 weight : %f' % self.l2wd )
+        pydev.log('weight_stddev : %f' % self.weight_stddev)
+        pydev.log('bias_init : %f' % self.bias_init)
 
         Fdict = {
             'sigmoid'   : tf.sigmoid,
@@ -83,8 +85,8 @@ class Layer_OpFullConnect(ILayer):
         F = Fdict.get(op, None)
 
         self.x = inputs[0]
-        self.w = weight_variable([n_in, n_out], l2_weight=self.l2wd)
-        self.b = bias_variable([n_out], l2_weight=self.l2wd)
+        self.w = weight_variable([n_in, n_out], l2_weight=self.l2wd, stddev=self.weight_stddev)
+        self.b = bias_variable([n_out], init=self.bias_init)
 
         # active function.
         if F is None:
@@ -106,11 +108,16 @@ class Layer_FullConnect(ILayer):
         n_in = int( config_reader('n_in') )
         n_out = int( config_reader('n_out') )
         self.l2wd = float(config_reader('l2wd', 0.0))
-        print >> sys.stderr, 'l2 weight : %f' % self.l2wd
+        self.bias_init = float(config_reader('bias_init', 0.0))
+        self.weight_stddev = float(config_reader('weight_stddev', 0.01))
+        
+        pydev.log('l2 weight : %f' % self.l2wd )
+        pydev.log('weight_stddev : %f' % self.weight_stddev)
+        pydev.log('bias_init : %f' % self.bias_init)
 
         self.x = inputs[0]
-        self.w = weight_variable([n_in, n_out], l2_weight=self.l2wd)
-        self.b = bias_variable([n_out], l2_weight=self.l2wd)
+        self.w = weight_variable([n_in, n_out], l2_weight=self.l2wd, stddev=self.weight_stddev)
+        self.b = bias_variable([n_out], init=self.bias_init)
 
         # active function.
         self.y = tf.matmul(self.x, self.w) + self.b
@@ -198,7 +205,7 @@ class Layer_Conv2D(ILayer):
 
         # x, y, in_chan, out_chan
         self.W = weight_variable(self.shape, l2_weight=self.l2wd)
-        self.b = bias_variable([self.shape[3]], l2_weight=self.l2wd)
+        self.b = bias_variable([self.shape[3]])
 
         print >> sys.stderr, 'l2 weight : %f' % self.l2wd
         print >> sys.stderr, 'Conv-shape : %s' % (self.shape)
@@ -260,7 +267,7 @@ class Layer_Conv2DPooling(ILayer):
         print >> sys.stderr, 'l2 weight : %f' % self.l2wd
 
         self.W = weight_variable(self.shape, l2_weight=self.l2wd)
-        self.b = bias_variable([self.shape[3]], l2_weight=self.l2wd)
+        self.b = bias_variable([self.shape[3]])
 
         self.pooling_size = int( config_reader('pool_size') )
         self.pooling_strides = int( config_reader('pool_strides') )
@@ -309,6 +316,28 @@ class Layer_Softmax(ILayer):
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         self.y = tf.nn.softmax(self.x)
+
+
+class MovingGradientDescentOptimizer:
+    def __init__(self, lr, decay=0.9999):
+        self.__lr = lr
+        self.__decay = decay
+
+    def minimize(self, cost, global_step):
+        # Compute gradients.
+        opt = tf.train.GradientDescentOptimizer(self.__lr)
+        grads = opt.compute_gradients(cost)
+
+        # Apply gradients.
+        apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
+
+        # Track the moving averages of all trainable variables.
+        variable_averages = tf.train.ExponentialMovingAverage(self.__decay, global_step)
+        variables_averages_op = variable_averages.apply(tf.trainable_variables())
+
+        with tf.control_dependencies([apply_gradient_op, variables_averages_op]):
+            self.train = tf.no_op(name='train')
+        return self.train
 
 class ConfigNetwork:
     def __init__(self, config_file, network_name, output_01=False):
@@ -386,20 +415,18 @@ class ConfigNetwork:
         # cost function.
         self.cost = self.__get_layer(cost_name).y
 
-        # TODO. add l2 loss.
         tf.add_to_collection('losses', self.__get_layer(cost_name).y)
         self.cost = tf.add_n(tf.get_collection('losses'), name='total_loss')
-
 
         # learning method and learning rate.
         self.__learner = pydev.config_dict_get(cp, network_name, 'learner', 
                 {
-                    'gradient'  : tf.train.GradientDescentOptimizer,
-                    'adam'      : tf.train.AdamOptimizer,
+                    'gradient'          : tf.train.GradientDescentOptimizer,
+                    'movingGradient'    : MovingGradientDescentOptimizer,
+                    'adam'              : tf.train.AdamOptimizer,
                 }, default_key='gradient'
                 )
-
-                
+        
         self.__lr_value = float( pydev.config_default_get(cp, network_name, 'learning_rate', 1e-3) )
         self.__lr_decay_ratio = float( pydev.config_default_get(cp, network_name, 'learning_decay_ratio', 0.96) )
         self.__lr_decay_step = float( pydev.config_default_get(cp, network_name, 'learning_decay_step', 300) )
@@ -440,6 +467,7 @@ class ConfigNetwork:
     def predict(self, X):
         ret = None
         batch_size = self.__batch_size
+
         for b in range(0, len(X), batch_size):
             feed_dict = {}
             feed_dict[ self.__inputs[0] ] = X[b:b+batch_size]
@@ -454,7 +482,7 @@ class ConfigNetwork:
                 ret = numpy.append(ret, partial_ret, axis=0)
         return ret
 
-    def fit(self, X, Y, callback=None, callback_iteration=100):
+    def fit(self, X, Y, callback=None, callback_iteration=100, preprocessor=None):
         '''
             X : training X
             Y : training Y
@@ -464,30 +492,41 @@ class ConfigNetwork:
         '''
 
         # tensor board train_writer.
+        ts = time.asctime().replace(' ', '_')
         self.__train_writer = tf.train.SummaryWriter(
-                            './tb_dir',
+                            './tensorboard_logs/%s/%s' % (self.__network_name, ts),
                             self.session.graph)
 
         # init all variables.
         self.session.run( tf.initialize_all_variables() )
 
         # simple train.
-        tm = time.time()
         data_size = len(X)
         iteration_count = (self.__epoch * data_size) // self.__batch_size
         print >> sys.stderr, 'Iteration=%d (batchsize=%d, epoch=%d, datasize=%d)' % (
                 iteration_count, self.__batch_size, self.__epoch, data_size)
-        offset = 0
         self.__current_iteration = 0
 
         last_percentage = 0
         last_callback_iteration = 0
+        begin_tm = time.time()
         for it in xrange( iteration_count ):
             # training code.
             self.__current_iteration = it
-            sub_X = X[offset : offset+self.__batch_size, ...]
-            sub_Y = Y[offset : offset+self.__batch_size, ...]
-            offset = (offset + self.__batch_size) % data_size
+
+            # sample indices
+            indices = random.sample( range(len(X)), self.__batch_size )
+            
+            sub_X = []
+            sub_Y = []
+            for idx in indices:
+                sub_X.append( X[idx] )
+                sub_Y.append( Y[idx] )
+            sub_X = numpy.array(sub_X)
+            sub_Y = numpy.array(sub_Y)
+
+            if preprocessor:
+                sub_X, sub_Y = preprocessor(sub_X, sub_Y)
 
             cost, summary_info, lr = self.fit_one_batch(sub_X, sub_Y)
             self.__train_writer.add_summary(summary_info, self.__current_iteration)
@@ -498,23 +537,9 @@ class ConfigNetwork:
                 if it - last_callback_iteration >= callback_iteration:
                     callback(self.predict, self.__train_writer, self.__current_iteration)
                     last_callback_iteration = it
-                '''
-                # callback by percentage.
-                if percentage - last_percentage >= callback_interval:
-                    callback(self.predict)
-                    last_percentage = percentage
-                '''
 
-            sys.stderr.write('%cTraining progress: %3.1f%% [cur_loss=%.4f, lr=%f]' % (
-                13, percentage * 100., cost, lr))
-
-            '''
-            if (it+1) % 10 == 0:
-                diff_tm = time.time() - tm
-                print >> sys.stderr, 'iter=%d/%d, cost=%.5f, tm=%.3f' % (
-                        it+1, iteration_count, cost, diff_tm)
-                tm = time.time()
-            '''
+            sys.stderr.write('%cTraining progress: %3.1f%% [iteration=%7d loss=%.4f, lr=%f, iqs=%.2f]' % (
+                13, percentage * 100., it, cost, lr, (it+1.) / (time.time()-begin_tm) ))
 
     def calc_cost(self, *args):
         # simple N epoch train.
@@ -530,9 +555,6 @@ class ConfigNetwork:
 
         # debug cost.
         y = self.active.eval(feed_dict=feed_dict, session=self.session)
-        #print 'y[0]:' +  str(y[0]) 
-        #print 'label:' + str(feed_dict[ self.__label ][0])
-
         final_cost = self.cost.eval(feed_dict=feed_dict, session=self.session)
         return final_cost
 
@@ -542,11 +564,6 @@ class ConfigNetwork:
         # last one is label.
         for idx, item in enumerate(args):
             if idx == len(args)-1:
-                # TODO: shape is not fixed.
-                ''' 
-                if len(item.shape) == 1:
-                    item.shape = (item.shape[0], 1)
-                '''
                 feed_dict[ self.__label ] = item
             else:
                 feed_dict[ self.__inputs[idx] ] = item
