@@ -489,9 +489,19 @@ class ConfigNetwork:
             callback : callback when training. callback type: callback(predict_function)
             callback_interval : interval to call back (total 1.0)
             callback_iteration : callback each N iterations.
+            preprocess : preprocess tensor for each (x, y)
         '''
 
-        # tensor board train_writer.
+        # make shuffle and preprocess graph.
+        holder_x = tf.constant(X)
+        holder_y = tf.constant(Y)
+
+        queue_x, queue_y = tf.train.slice_input_producer([holder_x, holder_y])
+        if preprocessor is not None:
+            queue_x, queue_y = preprocessor(queue_x, queue_y)
+        batch_x, batch_y = tf.train.batch([queue_x, queue_y], batch_size=self.__batch_size, num_threads=4)
+
+        # initialize the training summary.
         ts = time.asctime().replace(' ', '_')
         self.__train_writer = tf.train.SummaryWriter(
                             './tensorboard_logs/%s/%s' % (self.__network_name, ts),
@@ -509,37 +519,40 @@ class ConfigNetwork:
 
         last_percentage = 0
         last_callback_iteration = 0
-        begin_tm = time.time()
-        for it in xrange( iteration_count ):
-            # training code.
-            self.__current_iteration = it
+        begin_time = time.time()
+        with self.session.as_default():
+            coord = tf.train.Coordinator()
+            threads = tf.train.start_queue_runners(coord = coord)
 
-            # sample indices
-            indices = random.sample( range(len(X)), self.__batch_size )
-            
-            sub_X = []
-            sub_Y = []
-            for idx in indices:
-                sub_X.append( X[idx] )
-                sub_Y.append( Y[idx] )
-            sub_X = numpy.array(sub_X)
-            sub_Y = numpy.array(sub_Y)
+            for it in xrange( 1, iteration_count+1 ):
+                # training code.
+                self.__current_iteration = it
+                
+                # run back data and fit one batch.
+                sub_x, sub_y = self.session.run([batch_x, batch_y])
 
-            if preprocessor:
-                sub_X, sub_Y = preprocessor(sub_X, sub_Y)
+                cost, summary_info, lr = self.fit_one_batch(sub_x, sub_y)
+                self.__train_writer.add_summary(summary_info, self.__current_iteration)
 
-            cost, summary_info, lr = self.fit_one_batch(sub_X, sub_Y)
-            self.__train_writer.add_summary(summary_info, self.__current_iteration)
+                # Report code.
+                percentage = it * 1. / iteration_count
+                cost_time = time.time() - begin_time
+                remain_time = cost_time / percentage - cost_time
 
-            # Report code.
-            percentage = it * 1. / iteration_count
-            if callback:
-                if it - last_callback_iteration >= callback_iteration:
-                    callback(self.predict, self.__train_writer, self.__current_iteration)
-                    last_callback_iteration = it
+                sys.stderr.write('%cProgress: %3.1f%% [%s/%s] [iter=%7d loss=%.4f lr=%f ips=%.2f]' % (
+                    13, 
+                    percentage * 100., 
+                    pydev.format_time(cost_time),
+                    pydev.format_time(remain_time),
+                    it, cost, lr, 
+                    it / (time.time()-begin_time) 
+                    ))
 
-            sys.stderr.write('%cTraining progress: %3.1f%% [iteration=%7d loss=%.4f, lr=%f, iqs=%.2f]' % (
-                13, percentage * 100., it, cost, lr, (it+1.) / (time.time()-begin_tm) ))
+                # call back the reporter and tester.
+                if callback:
+                    if it - last_callback_iteration >= callback_iteration:
+                        callback(self.predict, self.__train_writer, self.__current_iteration)
+                        last_callback_iteration = it
 
     def calc_cost(self, *args):
         # simple N epoch train.
