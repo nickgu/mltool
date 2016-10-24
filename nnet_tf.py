@@ -221,6 +221,41 @@ class Layer_Conv2D(ILayer):
                     + self.b 
                 )
 
+class Layer_StackConv2D(ILayer):
+    '''
+        Y = conv2d( conv2d( ... conv2d(x) ) )
+        multi-convolutional network.
+    '''
+    def __init__(self, inputs, config_reader=None):
+        self.x = inputs[0]
+        
+        stack_count = int( config_reader('stack_count', 1) )
+        pydev.log('StackCount : %d' % stack_count)
+
+        src = self.x
+        for i in range(0, stack_count):
+            dest = Layer_Conv2D([src], config_reader)
+            src = dest
+        self.y = dest
+
+    def fake_config_reader(self, stack_id, config_reader):
+        shape = map(int, config_reader('shape').split(','))
+        shape_0 = shape_reader('shape')
+        shape_other = '%d,%d,%d,%d' % (shape[0], shape[1], shape[3], shape[3])
+
+        def partial_config(stack_id, config_name, default_value):
+            if config_name == 'shape':
+                if stack_id == 0:
+                    return shape_0
+                else:
+                    return shape_other
+            else:
+                return config_reader(config_name, default_value)
+                
+        return lambda opt, default_value=None : partial_config(stack_id, opt, default_value)
+
+
+
 class Layer_Pooling(ILayer):
     '''
         Y = pooling(X)
@@ -354,6 +389,7 @@ class ConfigNetwork:
                 'conv2d'            : Layer_Conv2D,
                 'pooling'           : Layer_Pooling,
                 'conv2d_pool'       : Layer_Conv2DPooling,
+                'stack_conv2d'      : Layer_StackConv2D,
                 'reshape'           : Layer_Reshape,
                 'dropout'           : Layer_DropOut,
                 'local_norm'        : Layer_LocalResponseNormalization,
