@@ -229,19 +229,37 @@ class Layer_StackConv2D(ILayer):
     def __init__(self, inputs, config_reader=None):
         self.x = inputs[0]
         
-        stack_count = int( config_reader('stack_count', 1) )
-        pydev.log('StackCount : %d' % stack_count)
+        self.stacks = []
+        self.shape = map(int, config_reader('shape').split(','))
+        self.stack_count = int( config_reader('stack_count', 1) )
+        self.use_residual = int( config_reader('use_residual', 0) )
+        pydev.log('StackCount : %d' % self.stack_count)
+        pydev.log('use_residual : %d' % self.use_residual)
 
         src = self.x
-        for i in range(0, stack_count):
-            dest = Layer_Conv2D([src], config_reader)
+        for i in range(0, self.stack_count):
+            layer = Layer_Conv2D([src], self.__fake_config_reader(i, config_reader))
+            self.stacks.append(layer)
+            
+            dest = layer.y
             src = dest
-        self.y = dest
+        if self.use_residual:
+            pydev.log('use_residual!')
+            if self.shape[2] != self.shape[3]:
+                pydev.log('input shape is different with output shape, so residual by second stack.')
+                self.y = self.stacks[0].y + dest
+            else:
+                self.y = self.x + dest
+        else:
+            self.y = dest
 
-    def fake_config_reader(self, stack_id, config_reader):
-        shape = map(int, config_reader('shape').split(','))
-        shape_0 = shape_reader('shape')
-        shape_other = '%d,%d,%d,%d' % (shape[0], shape[1], shape[3], shape[3])
+    def __fake_config_reader(self, stack_id, config_reader):
+        shape_0 = config_reader('shape')
+        shape_other = '%d,%d,%d,%d' % (
+                self.shape[0], 
+                self.shape[1], 
+                self.shape[3],  # same as the third shape.
+                self.shape[3])
 
         def partial_config(stack_id, config_name, default_value):
             if config_name == 'shape':
