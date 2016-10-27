@@ -216,38 +216,6 @@ class Layer_DropOut(ILayer):
             y = tf.nn.dropout(x, keep_prob=prob)
             self.outputs.append( y )
 
-class Layer_Conv2D(ILayer):
-    ''' 
-        Y = conv2d(X)
-        param:
-            shape = window_x, window_y, in_chan, out_chan
-    '''
-    def __init__(self, inputs, config_reader=None):
-        self.shape = map(int, config_reader('shape').split(','))
-        self.l2wd = float(config_reader('l2wd', 0.0))
-
-        # x, y, in_chan, out_chan
-        self.W = weight_variable(self.shape, l2_weight=self.l2wd)
-        self.b = bias_variable([self.shape[3]])
-
-        print >> sys.stderr, 'l2 weight : %f' % self.l2wd
-        print >> sys.stderr, 'Conv-shape : %s' % (self.shape)
-
-        # out_chan
-        self.inputs = inputs
-        self.outputs = []
-        for x in inputs:
-            y = tf.nn.relu( 
-                        tf.nn.conv2d(
-                            x, 
-                            self.W, 
-                            strides=[1, 1, 1, 1], 
-                            padding='SAME'
-                        ) 
-                        + self.b 
-                    )
-            self.outputs.append( y )
-
 class Layer_StackConv2D(ILayer):
     '''
         Y = conv2d( conv2d( ... conv2d(x) ) )
@@ -356,59 +324,6 @@ class Layer_Pooling(ILayer):
 
             self.outputs.append( y )
 
-class Layer_Conv2DPooling(ILayer):
-    ''' 
-        Y = pooling( relu(conv2d(X)) )
-        param:
-            shape       : window_x, window_y, in_chan, out_chan
-            pool_type   : [max, avg]
-            pool_size   : window of [size x size] in pooling.
-            pool_strides: strides of [size x size] in pooling.
-    '''
-    def __init__(self, inputs, config_reader=None):
-        # x, y, in_chan, out_chan
-        self.shape = map(int, config_reader('shape').split(','))
-        self.l2wd = float(config_reader('l2wd', 0.0))
-
-        print >> sys.stderr, 'l2 weight : %f' % self.l2wd
-
-        self.W = weight_variable(self.shape, l2_weight=self.l2wd)
-        self.b = bias_variable([self.shape[3]])
-
-        self.pooling_size = int( config_reader('pool_size') )
-        self.pooling_strides = int( config_reader('pool_strides') )
-        self.pooling_type = config_reader('pool_type')
-        print >> sys.stderr, 'Conv-shape : %s' % (self.shape)
-
-        self.inputs = inputs
-        self.outputs = []
-        for x in inputs:
-            # out_chan
-            conv_out = tf.nn.relu( 
-                        tf.nn.conv2d(
-                            x, 
-                            self.W, 
-                            strides=[1, 1, 1, 1], 
-                            padding='SAME'
-                        ) 
-                        + self.b 
-                    )
-
-            print 'PoolingSize=%d' % self.pooling_size
-            if self.pooling_type == 'max':
-                y = tf.nn.max_pool(conv_out, 
-                            ksize=[1, self.pooling_size, self.pooling_size, 1],
-                            strides=[1, self.pooling_strides, self.pooling_strides, 1], 
-                            padding='SAME')
-            elif self.pooling_type == 'avg':
-                y = tf.nn.avg_pool(conv_out, 
-                            ksize=[1, self.pooling_size, self.pooling_size, 1],
-                            strides=[1, self.pooling_strides, self.pooling_strides, 1], 
-                            padding='SAME')
-            else:
-                print >> sys.stderr, 'Bad pooling type: %s' % self.pooling_type
-            self.outputs.append( y )
-
 #TODO: make a flatten layer and make fc no need for input_count.
 
 class Layer_Reshape(ILayer):
@@ -469,9 +384,10 @@ class ConfigNetwork:
                 'softmax'           : Layer_Softmax,
                 'tanh'              : Layer_Tanh,
                 'relu'              : Layer_Relu,
-                'conv2d'            : Layer_Conv2D,
                 'pooling'           : Layer_Pooling,
-                'conv2d_pool'       : Layer_Conv2DPooling,
+                # all following 4 layers has same implemention.
+                'conv2d'            : Layer_StackConv2D,
+                'conv2d_pool'       : Layer_StackConv2D,
                 'stack_conv2d'      : Layer_StackConv2D,
                 'stack_conv2d_pool' : Layer_StackConv2D,
                 'reshape'           : Layer_Reshape,
@@ -579,8 +495,11 @@ class ConfigNetwork:
 
         self.__train_summary_merged = tf.merge_all_summaries()
 
-        self.session = tf.Session()
-        #self.session = tf.Session(config=tf.ConfigProto(log_device_placement=True))
+        # setup session config.
+        session_config = tf.ConfigProto()
+        session_config.gpu_options.allow_growth = True
+        #session_config.gpu_options.per_process_gpu_fraction = 0.4
+        self.session = tf.Session(config = session_config)
 
     def save(self, model):
         saver = tf.train.Saver()
