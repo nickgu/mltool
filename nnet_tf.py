@@ -78,7 +78,9 @@ class Layer_Dot(ILayer):
         self.inputs = inputs
         a = inputs[0]
         b = inputs[1]
-        self.outputs = [ tf.mul(a, b) ] 
+
+        # TODO check BUG!
+        self.outputs = tf.reduce_sum( tf.mul(a, b) ) 
 
 class Layer_OpFullConnect(ILayer):
     ''' 
@@ -257,6 +259,11 @@ class Layer_StackConv2D(ILayer):
         self.shape = map(int, config_reader('shape').split(','))
         self.stack_count = int( config_reader('stack_count', 1) )
         self.use_residual = int( config_reader('use_residual', 0) )
+
+        self.pooling_size = int( config_reader('pool_size', 2) )
+        self.pooling_strides = int( config_reader('pool_strides', 2) )
+        self.pooling_type = config_reader('pool_type')
+
         pydev.log('StackCount : %d' % self.stack_count)
         pydev.log('use_residual : %d' % self.use_residual)
 
@@ -280,6 +287,18 @@ class Layer_StackConv2D(ILayer):
                     y = self.inputs[idx] + dest[idx]
             else:
                 y = dest[idx]
+
+            if self.pooling_type == 'max':
+                y = tf.nn.max_pool(y, 
+                            ksize=[1, self.pooling_size, self.pooling_size, 1],
+                            strides=[1, self.pooling_strides, self.pooling_strides, 1], 
+                            padding='SAME')
+            elif self.pooling_type == 'avg':
+                y = tf.nn.avg_pool(y, 
+                            ksize=[1, self.pooling_size, self.pooling_size, 1],
+                            strides=[1, self.pooling_strides, self.pooling_strides, 1], 
+                            padding='SAME')
+
             self.outputs.append(y)
 
 
@@ -390,6 +409,8 @@ class Layer_Conv2DPooling(ILayer):
                 print >> sys.stderr, 'Bad pooling type: %s' % self.pooling_type
             self.outputs.append( y )
 
+#TODO: make a flatten layer and make fc no need for input_count.
+
 class Layer_Reshape(ILayer):
     '''
         Y = reshape(X)
@@ -420,10 +441,10 @@ class MovingGradientDescentOptimizer:
         self.__lr = lr
         self.__decay = decay
 
-    def minimize(self, cost, global_step):
+    def minimize(self, loss, global_step):
         # Compute gradients.
         opt = tf.train.GradientDescentOptimizer(self.__lr)
-        grads = opt.compute_gradients(cost)
+        grads = opt.compute_gradients(loss)
 
         # Apply gradients.
         apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
@@ -452,6 +473,7 @@ class ConfigNetwork:
                 'pooling'           : Layer_Pooling,
                 'conv2d_pool'       : Layer_Conv2DPooling,
                 'stack_conv2d'      : Layer_StackConv2D,
+                'stack_conv2d_pool' : Layer_StackConv2D,
                 'reshape'           : Layer_Reshape,
                 'dropout'           : Layer_DropOut,
                 'local_norm'        : Layer_LocalResponseNormalization,
@@ -506,15 +528,23 @@ class ConfigNetwork:
             if name not in self.__layer_has_receiver:
                 warning_layers.append(name)
         if len(warning_layers)>0:
-            pydev.err('Layers of no receivers, check it : %s' % ','.join(warning_layers))
+            pydev.err('===[ Layers of no receivers, check it : %s ]===' % ','.join(warning_layers))
 
         # default use outputs[0] as y and loss.
         # make network-active function.
         self.active = self.__get_layer(active_name).outputs[0]
-        # cost function.
-        final_cost = self.__get_layer(cost_name).outputs[0]
-        tf.add_to_collection('losses', final_cost)
+
+        # loss function.
+        # main_loss : main target loss.
+        # pernalized_loss = wd_loss
+        # loss = main_loss + pernalize_loss
+        self.main_loss = self.__get_layer(cost_name).outputs[0]
+        tf.add_to_collection('losses', self.main_loss)
         self.loss = tf.add_n(tf.get_collection('losses'), name='total_loss')
+
+        # record losses.
+        tf.scalar_summary('train/total_loss', self.loss)
+        tf.scalar_summary('train/main_loss', self.main_loss)
 
         # learning method and learning rate.
         self.__learner = pydev.config_dict_get(cp, network_name, 'learner', 
@@ -547,8 +577,6 @@ class ConfigNetwork:
         # generate training function.
         self.train = self.__learner( self.__lr_tensor ).minimize(self.loss, global_step=global_step)
 
-        # Generate moving averages of all losses and associated summaries.
-        self.__add_loss_summaries(self.loss)
         self.__train_summary_merged = tf.merge_all_summaries()
 
         self.session = tf.Session()
@@ -580,7 +608,7 @@ class ConfigNetwork:
                 ret = numpy.append(ret, partial_ret, axis=0)
         return ret
 
-    def fit(self, X, Y, callback=None, callback_iteration=100, preprocessor=None):
+    def fit(self, X, Y, callback=None, callback_iteration=100, preprocessor=None, first_run=True):
         '''
             X : training X
             Y : training Y
@@ -595,6 +623,7 @@ class ConfigNetwork:
         #   make X as [tensors ...]
         if not isinstance(X, tuple) and not isinstance(X, list):
             X = [ X ]
+            pydev.log('fit X to be [X] %s' % type(X) )
 
         # make shuffle and preprocess graph.
         holders = []
@@ -607,17 +636,18 @@ class ConfigNetwork:
             queues = preprocessor( *queues )
         batchs = tf.train.batch(queues, batch_size=self.__batch_size, num_threads=4)
 
-        # initialize the training summary.
-        ts = time.asctime().replace(' ', '_')
-        self.__train_writer = tf.train.SummaryWriter(
-                            './tensorboard_logs/%s/%s' % (self.__network_name, ts),
-                            self.session.graph)
-
         # init all variables.
-        self.session.run( tf.initialize_all_variables() )
+        if first_run:
+            # initialize the training summary.
+            ts = time.asctime().replace(' ', '_')
+            self.__train_writer = tf.train.SummaryWriter(
+                                './tensorboard_logs/%s/%s' % (self.__network_name, ts),
+                                self.session.graph)
+
+            self.session.run( tf.initialize_all_variables() )
 
         # simple train.
-        data_size = len(X)
+        data_size = len(X[-1])
         iteration_count = (self.__epoch * data_size) // self.__batch_size
         print >> sys.stderr, 'Iteration=%d (batchsize=%d, epoch=%d, datasize=%d)' % (
                 iteration_count, self.__batch_size, self.__epoch, data_size)
@@ -637,7 +667,7 @@ class ConfigNetwork:
                 # run back data and fit one batch.
                 subs = self.session.run(batchs)
 
-                cost, summary_info, lr = self.fit_one_batch(*subs)
+                loss, main_loss, summary_info, lr = self.fit_one_batch(*subs)
                 self.__train_writer.add_summary(summary_info, self.__current_iteration)
 
                 # Report code.
@@ -645,12 +675,12 @@ class ConfigNetwork:
                 cost_time = time.time() - begin_time
                 remain_time = cost_time / percentage - cost_time
 
-                sys.stderr.write('%cProgress: %3.1f%% [%s/%s] [iter=%7d loss=%.4f lr=%f ips=%.2f]' % (
+                sys.stderr.write('%cProgress: %3.1f%% [%s/%s] [iter=%7d loss=%.4f(%.4f+%.4f) lr=%f ips=%.2f]' % (
                     13, 
                     percentage * 100., 
                     pydev.format_time(cost_time),
                     pydev.format_time(remain_time),
-                    it, cost, lr, 
+                    it, loss, main_loss, loss-main_loss, lr, 
                     it / (time.time()-begin_time) 
                     ))
 
@@ -660,7 +690,7 @@ class ConfigNetwork:
                         callback(self.predict, self.__train_writer, self.__current_iteration)
                         last_callback_iteration = it
 
-    def calc_cost(self, *args):
+    def calc_loss(self, *args):
         # simple N epoch train.
         feed_dict = {}
         # last one is label.
@@ -672,10 +702,10 @@ class ConfigNetwork:
             else:
                 feed_dict[ self.__inputs[idx] ] = item
 
-        # debug cost.
+        # debug loss.
         y = self.active.eval(feed_dict=feed_dict, session=self.session)
-        final_cost = self.loss.eval(feed_dict=feed_dict, session=self.session)
-        return final_cost
+        loss_value = self.loss.eval(feed_dict=feed_dict, session=self.session)
+        return loss_value
 
     def fit_one_batch(self, *args):
         # simple N epoch train.
@@ -687,10 +717,10 @@ class ConfigNetwork:
             else:
                 feed_dict[ self.__inputs[idx] ] = item
 
-        summary_info, cost, lr, _ = self.session.run(
-                [self.__train_summary_merged, self.loss, self.__lr_tensor, self.train], 
+        summary_info, loss, main_loss, lr, _ = self.session.run(
+                [self.__train_summary_merged, self.loss, self.main_loss, self.__lr_tensor, self.train], 
                 feed_dict=feed_dict)
-        return cost, summary_info, lr
+        return loss, main_loss, summary_info, lr
 
     def __init_layer(self, name):
         ltype, inames, layer = self.__layers_info.get(name, ['', [], None])
@@ -750,9 +780,6 @@ class ConfigNetwork:
 
     def __layer_config_reader(self, layer_name):
         return lambda opt,default_value=None: pydev.config_default_get(self.__config_parser, self.__network_name, ('%s.'%layer_name) + opt, default_value)
-
-    def __add_loss_summaries(self, total_loss):
-        tf.scalar_summary('train/total_loss', total_loss)
 
 if __name__=='__main__':
     pass
